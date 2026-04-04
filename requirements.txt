@@ -1,0 +1,7 @@
+discord.py
+fastapi
+uvicorn
+asyncpg
+google-api-python-client
+google-auth-oauthlib
+python-dotenv
