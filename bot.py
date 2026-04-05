@@ -1,61 +1,527 @@
 import discord
 import os
 import asyncio
+import traceback
 import urllib.parse
 
 from discord.ext import commands, tasks
+from discord.ui import View, Button, Modal, TextInput, Select, RoleSelect, ChannelSelect
 
-from database import get_pool
+from database import get_pool, set_server_config, get_all_server_configs, get_user_id, update_subscription_status, get_server_config_by_id, delete_server_config, get_server_configs_for_guild, is_premium, set_premium
+from utils import get_youtube_channel_name, CHECK, NEUTRAL, CROSS, BIN, EDIT, RED_BIN, COG, ADD, ROLE, LOG, YT, WARN, HOME, INFO, FLAG, HELP, PREMIUM, COLOR
 
 intents = discord.Intents.default()
-intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+class YouTubeChannelModal(Modal, title="Configure YouTube Channel"):
+    def __init__(self, parent_view: 'ConfigurationEditView', *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.parent_view = parent_view
+        self.channel_id = TextInput(
+            label="YouTube Channel ID",
+            placeholder="e.g., UCxxxxxxxxxxxxxxxxxxxxxx",
+            required=True,
+            min_length=1,
+            max_length=100,
+            default=parent_view.yt_channel_id
+        )
+        self.add_item(self.channel_id)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            await interaction.response.defer()
+            self.parent_view.yt_channel_id = self.channel_id.value
+            self.parent_view.last_interaction = interaction
+            
+            if self.parent_view.yt_channel_id and self.parent_view.role_id:
+                self.parent_view.server_id = await set_server_config(
+                    self.parent_view.guild_id,
+                    self.parent_view.yt_channel_id,
+                    self.parent_view.role_id,
+                    self.parent_view.channel_id,
+                    server_id=self.parent_view.server_id
+                )
+            
+            await self.parent_view.update_config_display()
+        except Exception as e:
+            print(f"Error in YouTubeChannelModal.on_submit: {e}")
+            import traceback
+            traceback.print_exc()
+
+class ConfigurationEditView(View):
+    """View for editing a server configuration"""
+    def __init__(self, guild_id: int, server_id: int = None, initial_config: dict = None):
+        super().__init__()
+        self.guild_id = guild_id
+        self.server_id = server_id
+        self.role_id = initial_config.get('role_id') if initial_config else None
+        self.channel_id = initial_config.get('log_channel_id') if initial_config else None
+        self.yt_channel_id = initial_config.get('yt_channel_id') if initial_config else None
+        self.current_modal = None
+        self.last_interaction = None
+    
+    async def get_status_embed(self) -> discord.Embed:
+        """Generate an embed showing current configuration state"""
+        title = f"{EDIT} Edit Existing Configuration" if self.server_id else f"{ADD} Add New Configuration"
+        embed = discord.Embed(
+            title=title,
+            color=COLOR
+        )
+        
+        if self.yt_channel_id:
+            yt_url = f"https://www.youtube.com/channel/{self.yt_channel_id}"
+            channel_name = await get_youtube_channel_name(self.yt_channel_id)
+            yt_status = f"{CHECK} [{channel_name}]({yt_url})"
+        else:
+            yt_status = f"{CROSS} Not set"
+        embed.add_field(name=f"YouTube Channel {YT}", value=yt_status, inline=False)
+        
+        role_status = f"{CHECK} <@&{self.role_id}>" if self.role_id else f"{CROSS} Not set"
+        embed.add_field(name=f"Subscriber Role {ROLE}", value=role_status, inline=False)
+        
+        channel_status = f"{CHECK} <#{self.channel_id}>" if self.channel_id else f"{CROSS} Not set"
+        embed.add_field(name=f"Log Channel {LOG}", value=channel_status, inline=False)
+        
+        return embed
+    
+    async def update_config_display(self):
+        """Update the message with current configuration state"""
+        if not self.last_interaction:
+            return
+        
+        embed = await self.get_status_embed()
+        try:
+            await self.last_interaction.edit_original_response(embed=embed, view=self)
+        except Exception as e:
+            print(f"Error updating config display: {e}")
+    
+    @discord.ui.button(label="Set YouTube Channel", emoji=YT, style=discord.ButtonStyle.grey)
+    async def set_channel(self, interaction: discord.Interaction, button: Button):
+        try:
+            modal = YouTubeChannelModal(self, title="Configure YouTube Channel")
+            self.last_interaction = interaction
+            await interaction.response.send_modal(modal)
+        except Exception as e:
+            print(f"Error in set_channel: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} Error: {e}", color=COLOR), ephemeral=True)
+    
+    @discord.ui.button(label="Back", emoji=HOME, style=discord.ButtonStyle.grey)
+    async def back_button(self, interaction: discord.Interaction, button: Button):
+        try:
+            embed = discord.Embed(
+                title=f"{COG} Server Configuration",
+                description="Choose an action to manage your server's YouTube subscriber role settings",
+                color=COLOR
+            )
+            view = SetupMainView(self.guild_id)
+            await interaction.response.edit_message(embed=embed, view=view)
+        except Exception as e:
+            print(f"Error in back_button: {e}")
+    
+    @discord.ui.select(cls=RoleSelect, placeholder="Select subscriber role")
+    async def select_role(self, interaction: discord.Interaction, select: Select):
+        try:
+            self.role_id = select.values[0].id
+            self.last_interaction = interaction
+            await interaction.response.defer()
+            
+            if self.yt_channel_id and self.role_id:
+                self.server_id = await set_server_config(
+                    self.guild_id,
+                    self.yt_channel_id,
+                    self.role_id,
+                    self.channel_id,
+                    server_id=self.server_id
+                )
+            
+            await self.update_config_display()
+        except Exception as e:
+            print(f"Error in select_role: {e}")
+    
+    @discord.ui.select(cls=ChannelSelect, placeholder="Select log channel", min_values=1, max_values=1)
+    async def select_channel(self, interaction: discord.Interaction, select: Select):
+        try:
+            self.channel_id = select.values[0].id
+            self.last_interaction = interaction
+            await interaction.response.defer()
+            
+            if self.yt_channel_id and self.role_id:
+                self.server_id = await set_server_config(
+                    self.guild_id,
+                    self.yt_channel_id,
+                    self.role_id,
+                    self.channel_id,
+                    server_id=self.server_id
+                )
+            
+            await self.update_config_display()
+        except Exception as e:
+            print(f"Error in select_channel: {e}")
+
+class ConfigSelectView(View):
+    """View for selecting which configuration to edit/delete"""
+    def __init__(self, configs, callback, guild_id: int, channel_names: dict = None):
+        super().__init__()
+        self.configs = configs
+        self.callback = callback
+        self.guild_id = guild_id
+        self.channel_names = channel_names or {}
+        
+        options = []
+        for i, config in enumerate(configs):
+            channel_name = self.channel_names.get(config['yt_channel_id'], config['yt_channel_id'])
+            options.append(
+                discord.SelectOption(
+                    label=f"{channel_name}",
+                    value=str(config['id']),
+                    description=f"{config['yt_channel_id']}"
+                )
+            )
+        
+        select = Select(
+            placeholder="Select a configuration",
+            options=options
+        )
+        select.callback = self.on_select
+        self.add_item(select)
+    
+    async def on_select(self, interaction: discord.Interaction):
+        server_id = int(interaction.data['values'][0])
+        await self.callback(interaction, server_id)
+    
+    @discord.ui.button(label="Back", emoji=HOME, style=discord.ButtonStyle.grey)
+    async def back_button(self, interaction: discord.Interaction, button: Button):
+        try:
+            embed = discord.Embed(
+                title=f"{COG} Server Configuration",
+                description="Choose an action to manage your server's YouTube subscriber role settings",
+                color=COLOR
+            )
+            view = SetupMainView(self.guild_id)
+            await interaction.response.edit_message(embed=embed, view=view, content=None)
+        except Exception as e:
+            print(f"Error in back_button: {e}")
+
+class ConfirmDeleteView(View):
+    """View for confirming deletion"""
+    def __init__(self, guild_id: int, server_id: int):
+        super().__init__()
+        self.guild_id = guild_id
+        self.server_id = server_id
+    
+    @discord.ui.button(label="Yes, Delete", emoji=RED_BIN, style=discord.ButtonStyle.grey)
+    async def yes_delete(self, interaction: discord.Interaction, button: Button):
+        await delete_server_config(self.server_id)
+        await interaction.response.edit_message(content=None, embed=discord.Embed(description=f"{BIN} Configuration deleted!", color=COLOR), view=None)
+        self.stop()
+    
+    @discord.ui.button(label="Cancel", emoji=NEUTRAL, style=discord.ButtonStyle.grey)
+    async def no_cancel(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.edit_message(content=None, embed=discord.Embed(description=f"{NEUTRAL} Deletion cancelled.", color=COLOR), view=None)
+        self.stop()
+    
+    @discord.ui.button(label="Back", emoji=HOME, style=discord.ButtonStyle.grey)
+    async def back_button(self, interaction: discord.Interaction, button: Button):
+        try:
+            embed = discord.Embed(
+                title=f"{COG} Server Configuration",
+                description="Choose an action to manage your server's YouTube subscriber role settings",
+                color=COLOR
+            )
+            view = SetupMainView(self.guild_id)
+            await interaction.response.edit_message(embed=embed, view=view)
+        except Exception as e:
+            print(f"Error in back_button: {e}")
+
+class SetupMainView(View):
+    """Main setup menu with Add/Edit/Delete options"""
+    def __init__(self, guild_id: int):
+        super().__init__()
+        self.guild_id = guild_id
+    
+    @discord.ui.button(label="Add New", emoji=ADD, style=discord.ButtonStyle.grey)
+    async def add_config(self, interaction: discord.Interaction, button: Button):
+        try:
+            configs = await get_server_configs_for_guild(self.guild_id)
+            premium = await is_premium(self.guild_id)
+            max_configs = 5 if premium else 1
+            
+            if len(configs) >= max_configs:
+                await interaction.response.send_message(
+                    embed=discord.Embed(description=f"{CROSS} You have reached the maximum number of configurations ({max_configs}). Upgrade to {PREMIUM} premium for a total of {max_configs * 5} configurations.", color=COLOR),
+                    ephemeral=True
+                )
+                return
+            
+            view = ConfigurationEditView(self.guild_id)
+            embed = await view.get_status_embed()
+            await interaction.response.edit_message(embed=embed, view=view)
+        except Exception as e:
+            print(f"Error in add_config: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} An error occurred: {e}", color=COLOR), ephemeral=True)
+    
+    @discord.ui.button(label="Edit Existing", emoji=EDIT, style=discord.ButtonStyle.grey)
+    async def edit_config(self, interaction: discord.Interaction, button: Button):
+        try:
+            configs = await get_server_configs_for_guild(self.guild_id)
+            
+            if not configs:
+                await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} No configurations found.", color=COLOR), ephemeral=True)
+                return
+            
+            if len(configs) == 1:
+                await self.show_edit_page(interaction, configs[0]['id'])
+            else:
+                channel_names = {}
+                for config in configs:
+                    channel_names[config['yt_channel_id']] = await get_youtube_channel_name(config['yt_channel_id'])
+                
+                select_view = ConfigSelectView(configs, self.on_config_selected_for_edit, self.guild_id, channel_names)
+                await interaction.response.edit_message(content=None, embed=discord.Embed(title=f"{EDIT} Select Configuration", description=f"Choose from the `{len(configs)}` existing configuration{'s' if len(configs) > 1 else ''} to edit.", color=COLOR), view=select_view)
+        except Exception as e:
+            print(f"Error in edit_config: {e}")
+    
+    async def on_config_selected_for_edit(self, interaction: discord.Interaction, server_id: int):
+        await self.show_edit_page(interaction, server_id)
+    
+    async def show_edit_page(self, interaction: discord.Interaction, server_id: int):
+        try:
+            config = await get_server_config_by_id(server_id)
+            
+            view = ConfigurationEditView(interaction.guild_id, server_id, initial_config=config)
+            embed = await view.get_status_embed()
+            
+            if interaction.response.is_done():
+                await interaction.edit_original_response(content=None, embed=embed, view=view)
+            else:
+                await interaction.response.edit_message(content=None, embed=embed, view=view)
+        except Exception as e:
+            print(f"Error in show_edit_page: {e}")
+    
+    @discord.ui.button(label="Delete Existing", emoji=BIN, style=discord.ButtonStyle.grey)
+    async def delete_config(self, interaction: discord.Interaction, button: Button):
+        try:
+            configs = await get_server_configs_for_guild(self.guild_id)
+            
+            if not configs:
+                await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} No configurations found.", color=COLOR), ephemeral=True)
+                return
+            
+            if len(configs) == 1:
+                confirm_view = ConfirmDeleteView(self.guild_id, configs[0]['id'])
+                channel_name = await get_youtube_channel_name(configs[0]['yt_channel_id'])
+                embed = discord.Embed(
+                    title=f"{WARN} Confirm Deletion",
+                    description=f"Are you sure you want to delete this configuration?\n\n{YT} Channel: [{channel_name}](https://www.youtube.com/channel/{configs[0]['yt_channel_id']})\n{ROLE} Role: <@&{configs[0]['role_id']}>\n{LOG} Log Channel: <#{configs[0]['log_channel_id']}>",
+                    color=COLOR
+                )
+                await interaction.response.edit_message(embed=embed, view=confirm_view)
+            else:
+                channel_names = {}
+                for config in configs:
+                    channel_names[config['yt_channel_id']] = await get_youtube_channel_name(config['yt_channel_id'])
+                
+                select_view = ConfigSelectView(configs, self.on_config_selected_for_delete, self.guild_id, channel_names)
+                await interaction.response.edit_message(content=None, embed=discord.Embed(title=f"{BIN} Select Configuration", description=f"Choose from the `{len(configs)}` existing configuration{'s' if len(configs) > 1 else ''} to delete.", color=COLOR), view=select_view)
+        except Exception as e:
+            print(f"Error in delete_config: {e}")
+    
+    async def on_config_selected_for_delete(self, interaction: discord.Interaction, server_id: int):
+        try:
+            config = await get_server_config_by_id(server_id)
+            channel_name = await get_youtube_channel_name(config['yt_channel_id'])
+            confirm_view = ConfirmDeleteView(interaction.guild_id, server_id)
+            embed = discord.Embed(
+                title=f"{WARN} Confirm Deletion",
+                description=f"Are you sure you want to delete this configuration?\n\n{YT} Channel: [{channel_name}](https://www.youtube.com/channel/{config['yt_channel_id']})\n{ROLE} Role: <@&{config['role_id']}>\n{LOG} Log Channel: <#{config['log_channel_id']}>",
+                color=COLOR
+            )
+            await interaction.response.edit_message(content=None, embed=embed, view=confirm_view)
+        except Exception as e:
+            print(f"Error in on_config_selected_for_delete: {e}")
+
+@bot.tree.command(name="setup", description="Configure the bot for your server. (Admin only)")
+async def setup(interaction: discord.Interaction):
+    """Setup the bot for the server (requires admin permissions)"""
+    
+    if not interaction.permissions.administrator:
+        await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} You need administrator permissions to run this command.", color=COLOR), ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title=f"{COG} Server Configuration",
+        description="Choose an action below to manage your server's YouTube subscriber role settings!",
+        color=COLOR
+    )
+    
+    view = SetupMainView(interaction.guild_id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+@bot.tree.command(name="premium", description="Enable premium for this server. (Owner only)")
+async def premium(interaction: discord.Interaction):
+    """Enable premium for the server"""
+    
+    if interaction.user.id != 692254240290242601:
+        await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} Only the bot owner can use this command.", color=COLOR), ephemeral=True)
+        return
+    
+    await set_premium(interaction.guild_id, True)
+    await interaction.response.send_message(
+        embed=discord.Embed(description=f"{PREMIUM} Premium enabled for this server! You can now add up to 5 YouTube channel configurations.", color=COLOR),
+        ephemeral=True
+    )
+
+class VerifyChannelSelectView(View):
+    """View for selecting which channel to verify for"""
+    def __init__(self, configs, channel_names: dict = None):
+        super().__init__()
+        self.configs = configs
+        self.channel_names = channel_names or {}
+        
+        options = []
+        for i, config in enumerate(configs):
+            channel_name = self.channel_names.get(config['yt_channel_id'], config['yt_channel_id'])
+            options.append(
+                discord.SelectOption(
+                    label=f"{channel_name}",
+                    value=str(config['id']),
+                    description=f"{config['yt_channel_id']}"
+                )
+            )
+        
+        select = Select(
+            placeholder="Select YouTube channel to get role for",
+            options=options
+        )
+        select.callback = self.on_select
+        self.add_item(select)
+    
+    async def on_select(self, interaction: discord.Interaction):
+        server_id = int(interaction.data['values'][0])
+        config = next(c for c in self.configs if c['id'] == server_id)
+        
+        user_subscription = None
+        try:
+            user_id = await get_user_id(interaction.guild_id, interaction.user.id)
+            pool = await get_pool()
+            async with pool.acquire() as connection:
+                user_subscription = await connection.fetchrow(
+                    "SELECT is_subscribed, last_checked FROM subscriptions WHERE user_id = $1 AND server_id = $2",
+                    user_id, server_id
+                )
+        except Exception as e:
+            print(f"Error checking user subscription: {e}")
+        
+        await self.send_verification_link(interaction, config, user_subscription)
+    
+    @staticmethod
+    async def send_verification_link(interaction: discord.Interaction, config, user_subscription=None):
+        guild_id = interaction.guild_id
+        client_id = os.environ.get("GOOGLE_CLIENT_ID")
+        redirect_uri = os.environ.get("OAUTH_REDIRECT_URI", "http://subscriber.iancheung.dev/callback")
+        
+        state = f"{guild_id}_{interaction.user.id}_{config['id']}" # guild_id_discord_id_server_id
+        
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "https://www.googleapis.com/auth/youtube.readonly",
+            "access_type": "offline",
+            "prompt": "consent",
+            "state": state
+        }
+        
+        url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+        yt_channel_id = config['yt_channel_id']
+        yt_channel_url = f"https://www.youtube.com/channel/{yt_channel_id}"
+        channel_name = await get_youtube_channel_name(yt_channel_id)
+        
+        embed = discord.Embed(
+            title=f"YouTube Account Verification {HELP}",
+            description=f"1. Make sure you are **subscribed** to [{channel_name}]({yt_channel_url}) first!\n"
+                        f"2. Click **[here]({url})** to link your YouTube account and get your subscriber role.\n"
+                        f"3. *You will be redirected to Google to authorize access.*",
+            color=COLOR
+        )
+        
+        embeds = [embed]
+        
+        if user_subscription:
+            status_emoji = f"{CHECK}" if user_subscription['is_subscribed'] else f"{CROSS}"
+            last_checked = f"{FLAG} <t:{int(user_subscription['last_checked'].timestamp())}>" if user_subscription['last_checked'] else f"{FLAG} Never"
+            
+            status_embed = discord.Embed(
+                title=f"Your Verification Status {INFO}",
+                color=discord.Color.green() if user_subscription['is_subscribed'] else discord.Color.red()
+            )
+            status_embed.add_field(name=f"Status", value=f"{status_emoji} {'Subscribed' if user_subscription['is_subscribed'] else 'Not Subscribed'}", inline=False)
+            status_embed.add_field(name=f"Last Checked", value=last_checked, inline=False)
+            
+            embeds.append(status_embed)
+        
+        try:
+            video_file = discord.File("demo.mp4")
+            await interaction.response.send_message(embeds=embeds, file=video_file, ephemeral=True)
+        except FileNotFoundError:
+            await interaction.response.send_message(embeds=embeds, ephemeral=True)
 
 @bot.tree.command(name="verify", description="Link your YouTube account to verify your subscription.")
 async def verify(interaction: discord.Interaction):
-    client_id = os.environ.get("GOOGLE_CLIENT_ID")
-    redirect_uri = os.environ.get("OAUTH_REDIRECT_URI", "http://subscriber.iancheung.dev/callback")
+    configs = await get_server_configs_for_guild(interaction.guild_id)
     
-    # State parameter holds the discord user ID
-    state = str(interaction.user.id)
+    if not configs:
+        await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} This server hasn't been configured yet. Please ask an admin to run `/setup`.", color=COLOR), ephemeral=True)
+        return
     
-    params = {
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": "https://www.googleapis.com/auth/youtube.readonly",
-        "access_type": "offline",
-        "prompt": "consent",
-        "state": state
-    }
-    
-    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
-    
-    embed = discord.Embed(
-        title="YouTube Account Verification",
-        description=f"Click [here]({url}) to link your YouTube account and sync your subscriber role.\n\n"
-                    f"*Note: You will be redirected to Google to authorize access.*",
-        color=discord.Color.red()
-    )
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    if len(configs) == 1:
+        user_subscription = None
+        try:
+            user_id = await get_user_id(interaction.guild_id, interaction.user.id)
+            pool = await get_pool()
+            async with pool.acquire() as connection:
+                user_subscription = await connection.fetchrow(
+                    "SELECT is_subscribed, last_checked FROM subscriptions WHERE user_id = $1 AND server_id = $2",
+                    user_id, configs[0]['id']
+                )
+        except Exception as e:
+            print(f"Error checking user subscription: {e}")
+        
+        await VerifyChannelSelectView.send_verification_link(interaction, configs[0], user_subscription)
+    else:
+        channel_names = {}
+        for config in configs:
+            channel_names[config['yt_channel_id']] = await get_youtube_channel_name(config['yt_channel_id'])
+        
+        view = VerifyChannelSelectView(configs, channel_names)
+        await interaction.response.send_message(embed=discord.Embed(description=f"{YT} Select which YouTube channel you have subscribed to:", color=COLOR), view=view, ephemeral=True)
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     try:
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
+        print(f"Loaded {len(synced)} Discord commands")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
     
     if not sync_roles.is_running():
         sync_roles.start()
 
-async def log_action(message, color=discord.Color.blue()):
-    log_channel_id = os.environ.get("LOG_CHANNEL_ID")
-    if log_channel_id:
-        channel = bot.get_channel(int(log_channel_id))
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+    traceback.print_exception(type(error), error, error.__traceback__)
+    if not interaction.response.is_done():
+        await interaction.response.send_message(f"An error occurred: {error}", ephemeral=True)
+
+async def log_action(guild_id: int, message: str, color=COLOR, server_id: int = None):
+    """Log an action to the configured log channel for a server"""
+    server_config = await get_server_config_by_id(server_id)
+    
+    if server_config and server_config['log_channel_id']:
+        channel = bot.get_channel(server_config['log_channel_id'])
         if channel:
             embed = discord.Embed(description=message, color=color)
             await channel.send(embed=embed)
@@ -65,90 +531,98 @@ async def sync_roles():
     print("Running background sync task...")
     from googleapiclient.discovery import build
     from google.oauth2.credentials import Credentials
-    import datetime
+    
     pool = await get_pool()
-    channel_id = os.environ["YT_CHANNEL_ID"]
-    guild_id = int(os.environ["GUILD_ID"])
-    role_id = int(os.environ["ROLE_ID"])
-    guild = bot.get_guild(guild_id)
-    if not guild:
-        return
+    all_configs = await get_all_server_configs()
+    
+    for config in all_configs:
+        server_id = config['id']
+        guild_id = config['guild_id']
+        yt_channel_id = config['yt_channel_id']
+        role_id = config['role_id']
+        yt_channel_url = f"https://www.youtube.com/channel/{yt_channel_id}"
         
-    role = guild.get_role(role_id)
-    if not role:
-        return
-        
-    async with pool.acquire() as connection:
-        rows = await connection.fetch("SELECT discord_id, refresh_token FROM users")
-        
-        for row in rows:
-            discord_id = row['discord_id']
-            refresh_token = row['refresh_token']
+        guild = bot.get_guild(guild_id)
+        if not guild:
+            print(f"Guild {guild_id} not found, skipping...")
+            continue
             
-            creds = Credentials(
-                token=None,
-                refresh_token=refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=os.environ["GOOGLE_CLIENT_ID"],
-                client_secret=os.environ["GOOGLE_CLIENT_SECRET"]
-            )
+        role = guild.get_role(role_id)
+        if not role:
+            print(f"Role {role_id} not found in guild {guild_id}, skipping...")
+            continue
+        
+        async with pool.acquire() as connection:
+            rows = await connection.fetch("SELECT id, discord_id, refresh_token FROM users WHERE guild_id = $1", guild_id)
             
-            def check_sub():
-                try:
-                    youtube = build('youtube', 'v3', credentials=creds)
-                    req = youtube.subscriptions().list(part="snippet", mine=True, forChannelId=channel_id)
-                    res = req.execute()
-                    items = res.get("items", [])
-                    return len(items) > 0
-                except Exception as e:
-                    print(f"Error for {discord_id}: {e}")
-                    return False
-                
-            is_subscribed = await asyncio.to_thread(check_sub)
+            semaphore = asyncio.Semaphore(10)
+            
+            async def process_user(row):
+                async with semaphore:
+                    user_id = row['id']
+                    discord_id = row['discord_id']
+                    refresh_token = row['refresh_token']
                     
-            try:
-                member = await guild.fetch_member(discord_id)
-            except discord.errors.NotFound:
-                member = None
-
-            if member:
-                has_role = role in member.roles
-                
-                if not is_subscribed and has_role:
-                    try:
-                        await member.remove_roles(role)
+                    if not refresh_token:
+                        return
+                    
+                    creds = Credentials(
+                        token=None,
+                        refresh_token=refresh_token,
+                        token_uri="https://oauth2.googleapis.com/token",
+                        client_id=os.environ["GOOGLE_CLIENT_ID"],
+                        client_secret=os.environ["GOOGLE_CLIENT_SECRET"]
+                    )
+                    
+                    def check_sub():
                         try:
-                            await log_action(f"Removed automated role from <@{discord_id}> because they are no longer subscribed.", discord.Color.orange())
+                            youtube = build('youtube', 'v3', credentials=creds)
+                            req = youtube.subscriptions().list(part="snippet", mine=True, forChannelId=yt_channel_id)
+                            res = req.execute()
+                            items = res.get("items", [])
+                            return len(items) > 0
                         except Exception as e:
-                            print(f"Role removed but failed to log: {e}")
-                    except discord.errors.Forbidden:
-                        print(f"Failed to remove role from {discord_id}: Bot lacks permission.")
-                        try:
-                            await log_action(f"⚠️ Attempted to remove role from <@{discord_id}> but bot lacks permission in role hierarchy.", discord.Color.red())
-                        except Exception:
-                            pass
-                    
-                if is_subscribed and not has_role:
+                            print(f"Error for {discord_id}: {e}")
+                            return False
+                        
+                    is_subscribed = await asyncio.to_thread(check_sub)
+                            
                     try:
-                        await member.add_roles(role)
-                        try:
-                            await log_action(f"Added automated role back to <@{discord_id}> because they re-subscribed.", discord.Color.green())
-                        except Exception as e:
-                            print(f"Role added but failed to log: {e}")
-                    except discord.errors.Forbidden:
-                        print(f"Failed to add role to {discord_id}: Bot lacks permission.")
-                        try:
-                            await log_action(f"⚠️ Attempted to add role to <@{discord_id}> but bot lacks permission in role hierarchy.", discord.Color.red())
-                        except Exception:
-                            pass
-                    
-            now = datetime.datetime.now()
-            await connection.execute("""
-                UPDATE users
-                SET is_subscribed = $1, last_checked = $2
-                WHERE discord_id = $3
-            """, is_subscribed, now, discord_id)
+                        member = await guild.fetch_member(discord_id)
+                    except discord.errors.NotFound:
+                        member = None
 
-@sync_roles.before_loop
-async def before_sync_roles():
-    await bot.wait_until_ready()
+                    if member:
+                        has_role = role in member.roles
+                        
+                        if not is_subscribed and has_role:
+                            try:
+                                await member.remove_roles(role)
+                                try:
+                                    await log_action(guild_id, f"Removed {role.mention} from <@{discord_id}> because they are no longer subscribed to [{yt_channel_id}]({yt_channel_url}).", discord.Color.orange(), server_id=server_id)
+                                except Exception as e:
+                                    print(f"Role removed but failed to log: {e}")
+                            except discord.errors.Forbidden:
+                                print(f"Failed to remove role from {discord_id}: Bot lacks permission.")
+                                try:
+                                    await log_action(guild_id, f"{WARN} Attempted to remove {role.mention} from <@{discord_id}> for [{yt_channel_id}]({yt_channel_url}) but bot lacks permission in role hierarchy.", discord.Color.red(), server_id=server_id)
+                                except Exception:
+                                    pass
+                            
+                        if is_subscribed and not has_role:
+                            try:
+                                await member.add_roles(role)
+                                try:
+                                    await log_action(guild_id, f"Added {role.mention} to <@{discord_id}> because they subscribed to [{yt_channel_id}]({yt_channel_url}).", discord.Color.green(), server_id=server_id)
+                                except Exception as e:
+                                    print(f"Role added but failed to log: {e}")
+                            except discord.errors.Forbidden:
+                                print(f"Failed to add role to {discord_id}: Bot lacks permission.")
+                                try:
+                                    await log_action(guild_id, f"{WARN} Attempted to add {role.mention} to <@{discord_id}> for [{yt_channel_id}]({yt_channel_url}) but bot lacks permission in role hierarchy.", discord.Color.red(), server_id=server_id)
+                                except Exception:
+                                    pass
+                        
+                    await update_subscription_status(user_id, server_id, yt_channel_id, is_subscribed)
+            
+            await asyncio.gather(*[process_user(row) for row in rows])

@@ -6,16 +6,64 @@ import datetime
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
-from database import get_pool
+from database import get_pool, get_user_id, update_user_refresh_token, update_subscription_status, get_server_config_by_id
 from bot import bot, log_action
+from utils import get_youtube_channel_name, CHECK, NEUTRAL, CROSS
 
 app = FastAPI()
 
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.environ.get("CORS_ORIGIN", "http://subscriber.iancheung.dev")],
+    allow_credentials=True,
+    allow_methods=["GET"],
+    allow_headers=["Content-Type"],
+    max_age=600,
+)
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[os.environ.get("ALLOWED_HOST", "subscriber.iancheung.dev")]
+)
+
+MAX_REQUEST_SIZE = 1_000_000
+
+BLOCKED_USER_AGENTS = ["bot", "crawler", "spider", "scraper", "curl", "wget", "python-requests"]
+
+@app.middleware("http")
+async def validate_request_size_and_user_agent(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_REQUEST_SIZE:
+        return HTMLResponse(content="Request too large", status_code=413)
+    
+    user_agent = request.headers.get("user-agent", "").lower()
+    if any(blocked in user_agent for blocked in BLOCKED_USER_AGENTS):
+        return HTMLResponse(content="Access denied", status_code=403)
+    
+    response = await call_next(request)
+    
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    
+    return response
+
 @app.get("/", response_class=HTMLResponse)
-async def homepage():
+@limiter.limit("30/minute")
+async def homepage(request: Request):
     return """
     <!DOCTYPE html>
     <html>
@@ -37,7 +85,8 @@ async def homepage():
     """
 
 @app.get("/privacy", response_class=HTMLResponse)
-async def privacy_policy():
+@limiter.limit("30/minute")
+async def privacy_policy(request: Request):
     return """
     <!DOCTYPE html>
     <html>
@@ -116,14 +165,33 @@ def render_page(title: str, content: str) -> str:
     """
 
 @app.get("/callback")
+@limiter.limit("10/minute")
 async def callback(request: Request):
     code = request.query_params.get("code")
-    state = request.query_params.get("state")  # This is the discord_id
+    state = request.query_params.get("state")  # guild_id_discord_id_server_id
     
     if not code or not state:
         return HTMLResponse(render_page("Invalid Request", "Missing code or state."))
     
-    discord_id = int(state)
+    try:
+        parts = state.split("_")
+        if len(parts) != 3:
+            raise ValueError("Invalid state format")
+        guild_id = int(parts[0])
+        discord_id = int(parts[1])
+        server_id = int(parts[2])
+    except (ValueError, IndexError):
+        return HTMLResponse(render_page("Invalid Request", "Invalid state parameter."))
+    
+    server_config = await get_server_config_by_id(server_id)
+    
+    if not server_config:
+        return HTMLResponse(render_page("Configuration Error", "This server hasn't been configured yet. Ask an admin to run `/setup`."))
+    
+    yt_channel_id = server_config['yt_channel_id']
+    channel_name = await get_youtube_channel_name(yt_channel_id)
+    role_id = server_config['role_id']
+    
     redirect_uri = os.environ.get("OAUTH_REDIRECT_URI", "http://subscriber.iancheung.dev/callback")
     
     token_response = await get_tokens(code, redirect_uri)
@@ -134,16 +202,18 @@ async def callback(request: Request):
     access_token = token_response.get("access_token")
     refresh_token = token_response.get("refresh_token")
     
+    user_id = await get_user_id(guild_id, discord_id)
+    
     if not refresh_token:
-        # User already consented before, missing refresh token. Prompt consent was required.
-        # Check database for exisitng refresh token if available
         pool = await get_pool()
         async with pool.acquire() as connection:
-            row = await connection.fetchrow("SELECT refresh_token FROM users WHERE discord_id = $1", discord_id)
+            row = await connection.fetchrow("SELECT refresh_token FROM users WHERE id = $1", user_id)
             if row and row['refresh_token']:
                 refresh_token = row['refresh_token']
             else:
                 return HTMLResponse(render_page("Access Denied", "Could not retrieve a refresh token. Please re-authenticate and make sure to allow offline access."))
+    else:
+        await update_user_refresh_token(user_id, refresh_token)
         
     creds = Credentials(
         token=access_token,
@@ -153,25 +223,9 @@ async def callback(request: Request):
         client_secret=os.environ["GOOGLE_CLIENT_SECRET"]
     )
     
-    channel_id = os.environ["YT_CHANNEL_ID"]
+    is_subscribed = await asyncio.to_thread(check_youtube_subscription_sync, creds, yt_channel_id)
     
-    is_subscribed = await asyncio.to_thread(check_youtube_subscription_sync, creds, channel_id)
-    
-    pool = await get_pool()
-    now = datetime.datetime.now()
-    
-    async with pool.acquire() as connection:
-        await connection.execute("""
-            INSERT INTO users (discord_id, refresh_token, is_subscribed, last_checked)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (discord_id) DO UPDATE SET
-                refresh_token = EXCLUDED.refresh_token,
-                is_subscribed = EXCLUDED.is_subscribed,
-                last_checked = EXCLUDED.last_checked
-        """, discord_id, refresh_token, is_subscribed, now)
-        
-    guild_id = int(os.environ["GUILD_ID"])
-    role_id = int(os.environ["ROLE_ID"])
+    await update_subscription_status(user_id, server_id, yt_channel_id, is_subscribed)
     
     guild = bot.get_guild(guild_id)
     if not guild:
@@ -189,13 +243,15 @@ async def callback(request: Request):
     role = guild.get_role(role_id)
     if not role:
         return HTMLResponse(render_page("Role Not Found", "Internal bot error: Cannot find the specified role."))
+    
+    yt_channel_url = f"https://www.youtube.com/channel/{yt_channel_id}"
         
     if is_subscribed:
         try:
             await member.add_roles(role)
         except discord.errors.Forbidden:
             try:
-                await log_action(f"⚠️ Verification succeeded for <@{discord_id}>, but I don't have permission to assign the role.", discord.Color.orange())
+                await log_action(guild_id, f"{CROSS} Verification succeeded for <@{discord_id}> for {role.mention} on [{channel_name}]({yt_channel_url}), but bot lacks permission to assign role.", discord.Color.orange(), server_id=server_id)
             except:
                 pass
             return HTMLResponse(render_page("Permission Error", "Bot lacks permission to assign this role. Please explicitly ensure the bot's role is higher in the hierarchy than the Subscriber role."))
@@ -203,14 +259,14 @@ async def callback(request: Request):
             return HTMLResponse(render_page("Unexpected Error", f"An unexpected error occurred while assigning the role: {e}"))
 
         try:
-            await log_action(f"✅ Verified <@{discord_id}> and added the Subscriber role.", discord.Color.green())
+            await log_action(guild_id, f"{CHECK} Verified <@{discord_id}> and added {role.mention} for [{channel_name}]({yt_channel_url}).", discord.Color.green(), server_id=server_id)
         except Exception as e:
             return HTMLResponse(render_page("Success", f"Success! However, the bot failed to send a log message to the log channel. Please check the log channel permissions. Error: {e}"))
             
         return HTMLResponse(render_page("Verification Successful", "Success! Your subscription has been verified and you have been granted the role on Discord. You may now close this window."))
     else:
         try:
-            await log_action(f"❌ <@{discord_id}> attempted to verify, but is not subscribed to the target channel.", discord.Color.red())
+            await log_action(guild_id, f"{NEUTRAL} <@{discord_id}> attempted to verify for {role.mention} on [{channel_name}]({yt_channel_url}), but is not subscribed.", discord.Color.red(), server_id=server_id)
         except Exception as e:
-            pass # Keep returning the normal error message
+            pass
         return HTMLResponse(render_page("Verification Failed", "Verification failed: You are not subscribed to the required channel. Please subscribe and try again."))
