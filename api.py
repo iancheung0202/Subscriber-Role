@@ -62,7 +62,7 @@ async def homepage(request: Request):
     <body>
         <h1>Subscriber Role</h1>
         <p>Welcome to the <strong>Subscriber Role</strong> Discord application.</p>
-        <p><a href="https://discord.com/oauth2/authorize?client_id=1490081882140840016">Invite the bot to your server</a> | <a href="https://github.com/iancheung0202/Subscriber-Role">View source code on GitHub</a> | <a href="/privacy">Read the Privacy Policy</a></p>
+        <p><a href="https://discord.com/oauth2/authorize?client_id=1490081882140840016">Invite the bot to your server</a> | <a href="https://github.com/iancheung0202/Subscriber-Role">View source code on GitHub</a> | <a href="/privacy">Privacy Policy</a> | <a href="/terms">Terms of Service</a></p>
         <h2>What does this app do?</h2>
         <p>This is a simple Discord bot designed to verify whether a Discord user is subscribed to a specific YouTube channel. It uses the YouTube API to securely check the user's subscription status. If verified, the user is automatically granted a designated "Subscriber" role within the Discord server.</p>
         <h3>For Server Admins</h3>
@@ -106,6 +106,57 @@ async def privacy_policy(request: Request):
 
         <h2>3. Data Retention and Deletion</h2>
         <p>Your authentication tokens are stored securely in our database. If you wish to revoke our access at any time, you can do so from your <a href="https://myaccount.google.com/permissions" target="_blank">Google Account Permissions page</a>. Doing so will result in the automatic removal of your "Subscriber" role on Discord during the next automated check.</p>
+
+        <hr>
+        <p><a href="/">Return to Home</a></p>
+    </body>
+    </html>
+    """
+
+@app.get("/terms", response_class=HTMLResponse)
+@limiter.limit("30/minute")
+async def terms_of_service(request: Request):
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Subscriber Role - Terms of Service</title>
+        <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }</style>
+    </head>
+    <body>
+        <h1>Terms of Service for Subscriber Role</h1>
+        <p>Last updated: """ + datetime.datetime.now().strftime("%B %d, %Y") + """</p>
+        <p>By using the <strong>Subscriber Role</strong> Discord bot, you agree to the following terms and conditions.</p>
+        
+        <h2>1. Acceptance of Terms</h2>
+        <p>By inviting and using the Subscriber Role bot in your Discord server, you agree to be bound by these Terms of Service. If you do not agree with any of these terms, you should not use the bot.</p>
+
+        <h2>2. Use of the Bot</h2>
+        <p>The Subscriber Role bot is provided as-is for the purpose of verifying YouTube channel subscriptions and assigning Discord roles. You agree to use this bot in compliance with Discord's Terms of Service and Community Guidelines.</p>
+
+        <h2>3. User Responsibilities</h2>
+        <p>As a server administrator, you are responsible for:</p>
+        <ul>
+            <li>Configuring the bot appropriately with a valid YouTube channel ID and role.</li>
+            <li>Ensuring all users in your server understand and consent to the verification process.</li>
+            <li>Maintaining compliance with applicable laws and Discord policies.</li>
+            <li>Handling user data appropriately and respecting user privacy.</li>
+        </ul>
+
+        <h2>4. Limitation of Liability</h2>
+        <p>The Subscriber Role bot is provided on an "AS-IS" basis without warranties of any kind. We are not responsible for:</p>
+        <ul>
+            <li>Service interruptions, downtime, or data loss.</li>
+            <li>Errors in subscription verification or role assignment.</li>
+            <li>Discord API changes that may affect bot functionality.</li>
+            <li>Any damages or losses resulting from the use of this bot.</li>
+        </ul>
+
+        <h2>5. Modification and Termination</h2>
+        <p>We reserve the right to modify or discontinue the bot at any time without notice. We also reserve the right to terminate access to the bot for any user or server that violates these terms.</p>
+
+        <h2>6. Disclaimer</h2>
+        <p>This bot is not affiliated with Discord, Google, or YouTube. Discord, Google, and YouTube are trademarks of their respective owners.</p>
 
         <hr>
         <p><a href="/">Return to Home</a></p>
