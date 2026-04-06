@@ -8,7 +8,7 @@ from discord.ext import commands, tasks
 from discord.ui import View, Button, Modal, TextInput, Select, RoleSelect, ChannelSelect
 
 from database import get_pool, set_server_config, get_all_server_configs, get_user_id, update_subscription_status, get_server_config_by_id, delete_server_config, get_server_configs_for_guild, is_premium, set_premium
-from utils import get_youtube_channel_name, CHECK, NEUTRAL, CROSS, BIN, EDIT, RED_BIN, COG, ADD, ROLE, LOG, YT, WARN, HOME, INFO, FLAG, HELP, PREMIUM, COLOR
+from utils import get_youtube_channel_name, CHECK, NEUTRAL, CROSS, BIN, EDIT, RED_BIN, COG, ADD, ROLE, LOG, YT, WARN, HOME, INFO, FLAG, HELP, PREMIUM, MAIL, COLOR
 
 intents = discord.Intents.default()
 
@@ -30,13 +30,23 @@ class YouTubeChannelModal(Modal, title="Configure YouTube Channel"):
     def __init__(self, parent_view: 'ConfigurationEditView', *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.parent_view = parent_view
-        self.channel_id = TextInput(label="YouTube Channel ID", placeholder="e.g., UCxxxxxxxxxxxxxxxxxxxxxx", required=True, min_length=1, max_length=100, default=parent_view.yt_channel_id)
+        self.channel_id = TextInput(label="YouTube Channel ID", placeholder="e.g., UCxxxxxxxxxxxxxxxxxxxxxx", required=True, min_length=1, max_length=24, default=parent_view.yt_channel_id)
         self.add_item(self.channel_id)
     
     async def on_submit(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer()
-            self.parent_view.yt_channel_id = self.channel_id.value
+            channel_id = self.channel_id.value.strip()
+            
+            if not channel_id.startswith("UC"):
+                await interaction.followup.send(embed=discord.Embed(description=f"{CROSS} Invalid YouTube channel ID. It must start with 'UC'.\n[How to find my YouTube Channel ID?](https://support.google.com/youtube/answer/3250431) {INFO}", color=COLOR), ephemeral=True)
+                return
+            
+            if len(channel_id) != 24:
+                await interaction.followup.send(embed=discord.Embed(description=f"{CROSS} Invalid YouTube channel ID. It must `24` alphanumeric characters.\n[How to find my YouTube Channel ID?](https://support.google.com/youtube/answer/3250431) {INFO}", color=COLOR), ephemeral=True)
+                return
+            
+            self.parent_view.yt_channel_id = channel_id
             self.parent_view.last_interaction = interaction
             
             if self.parent_view.yt_channel_id and self.parent_view.role_id:
@@ -48,6 +58,50 @@ class YouTubeChannelModal(Modal, title="Configure YouTube Channel"):
             import traceback
             traceback.print_exc()
 
+class VerificationDMModal(Modal, title="Set Verification Message"):
+    def __init__(self, parent_view: 'ConfigurationEditView', *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.parent_view = parent_view
+        self.message_content = TextInput(label="Verification DM Content", placeholder="Leave blank to disable. This will be the embed description.", required=False, min_length=0, max_length=500, default=parent_view.verification_dm_content or "")
+        self.add_item(self.message_content)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            await interaction.response.defer()
+            content = self.message_content.value.strip() if self.message_content.value else None
+            self.parent_view.verification_dm_content = content
+            self.parent_view.last_interaction = interaction
+            
+            if self.parent_view.yt_channel_id and self.parent_view.role_id:
+                self.parent_view.server_id = await set_server_config(self.parent_view.guild_id, self.parent_view.yt_channel_id, self.parent_view.role_id, self.parent_view.channel_id, server_id=self.parent_view.server_id, verification_dm_content=self.parent_view.verification_dm_content, unsubscribe_dm_content=self.parent_view.unsubscribe_dm_content)
+            
+            await self.parent_view.update_config_display()
+        except Exception as e:
+            print(f"Error in VerificationDMModal.on_submit: {e}")
+            traceback.print_exc()
+
+class UnsubscribeDMModal(Modal, title="Set Unsubscribe Notification"):
+    def __init__(self, parent_view: 'ConfigurationEditView', *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.parent_view = parent_view
+        self.message_content = TextInput(label="Unsubscribe DM Content", placeholder="Leave blank to disable. This will be the embed description.", required=False, min_length=0, max_length=500, default=parent_view.unsubscribe_dm_content or "")
+        self.add_item(self.message_content)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            await interaction.response.defer()
+            content = self.message_content.value.strip() if self.message_content.value else None
+            self.parent_view.unsubscribe_dm_content = content
+            self.parent_view.last_interaction = interaction
+            
+            if self.parent_view.yt_channel_id and self.parent_view.role_id:
+                self.parent_view.server_id = await set_server_config(self.parent_view.guild_id, self.parent_view.yt_channel_id, self.parent_view.role_id, self.parent_view.channel_id, server_id=self.parent_view.server_id, verification_dm_content=self.parent_view.verification_dm_content, unsubscribe_dm_content=self.parent_view.unsubscribe_dm_content)
+            
+            await self.parent_view.update_config_display()
+        except Exception as e:
+            print(f"Error in UnsubscribeDMModal.on_submit: {e}")
+            traceback.print_exc()
+
 class ConfigurationEditView(View):
     def __init__(self, guild_id: int, server_id: int = None, initial_config: dict = None):
         super().__init__()
@@ -56,6 +110,8 @@ class ConfigurationEditView(View):
         self.role_id = initial_config.get('role_id') if initial_config else None
         self.channel_id = initial_config.get('log_channel_id') if initial_config else None
         self.yt_channel_id = initial_config.get('yt_channel_id') if initial_config else None
+        self.verification_dm_content = initial_config.get('verification_dm_content') if initial_config else None
+        self.unsubscribe_dm_content = initial_config.get('unsubscribe_dm_content') if initial_config else None
         self.current_modal = None
         self.last_interaction = None
     
@@ -73,6 +129,10 @@ class ConfigurationEditView(View):
         embed.add_field(name=f"Subscriber Role {ROLE}", value=role_status, inline=False)
         channel_status = f"{CHECK} <#{self.channel_id}>" if self.channel_id else f"{CROSS} Not set"
         embed.add_field(name=f"Log Channel {LOG}", value=channel_status, inline=False)
+        verification_status = f"{self.verification_dm_content}" if self.verification_dm_content else f"{CROSS} Disabled"
+        embed.add_field(name=f"Success Message {MAIL} {PREMIUM}", value=verification_status, inline=False)
+        unsubscribe_status = f"{self.unsubscribe_dm_content}" if self.unsubscribe_dm_content else f"{CROSS} Disabled"
+        embed.add_field(name=f"Unsubscribe Notification {FLAG} {PREMIUM}", value=unsubscribe_status, inline=False)
         return embed
     
     async def update_config_display(self):
@@ -109,6 +169,36 @@ class ConfigurationEditView(View):
         except Exception as e:
             print(f"Error in back_button: {e}")
     
+    @discord.ui.button(label="Set Success Message", emoji=MAIL, style=discord.ButtonStyle.grey, row=1)
+    async def set_verification_dm(self, interaction: discord.Interaction, button: Button):
+        try:
+            if not await is_premium(self.guild_id):
+                await interaction.response.send_message(embed=discord.Embed(description=f"{PREMIUM} This feature is for Premium servers only.", color=COLOR), ephemeral=True)
+                return
+            
+            modal = VerificationDMModal(self, title="Set Verification Message")
+            self.last_interaction = interaction
+            await interaction.response.send_modal(modal)
+        except Exception as e:
+            print(f"Error in set_verification_dm: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} Error: {e}", color=COLOR), ephemeral=True)
+    
+    @discord.ui.button(label="Set Unsubscribe Notification", emoji=FLAG, style=discord.ButtonStyle.grey, row=1)
+    async def set_unsubscribe_dm(self, interaction: discord.Interaction, button: Button):
+        try:
+            if not await is_premium(self.guild_id):
+                await interaction.response.send_message(embed=discord.Embed(description=f"{PREMIUM} This feature is for Premium servers only.", color=COLOR), ephemeral=True)
+                return
+            
+            modal = UnsubscribeDMModal(self, title="Set Unsubscribe Notification")
+            self.last_interaction = interaction
+            await interaction.response.send_modal(modal)
+        except Exception as e:
+            print(f"Error in set_unsubscribe_dm: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} Error: {e}", color=COLOR), ephemeral=True)
+    
     @discord.ui.select(cls=RoleSelect, placeholder="Select subscriber role")
     async def select_role(self, interaction: discord.Interaction, select: Select):
         try:
@@ -117,7 +207,7 @@ class ConfigurationEditView(View):
             await interaction.response.defer()
             
             if self.yt_channel_id and self.role_id:
-                self.server_id = await set_server_config(self.guild_id, self.yt_channel_id, self.role_id, self.channel_id, server_id=self.server_id)
+                self.server_id = await set_server_config(self.guild_id, self.yt_channel_id, self.role_id, self.channel_id, server_id=self.server_id, verification_dm_content=self.verification_dm_content, unsubscribe_dm_content=self.unsubscribe_dm_content)
             
             await self.update_config_display()
         except Exception as e:
@@ -131,7 +221,7 @@ class ConfigurationEditView(View):
             await interaction.response.defer()
             
             if self.yt_channel_id and self.role_id:
-                self.server_id = await set_server_config(self.guild_id, self.yt_channel_id, self.role_id, self.channel_id, server_id=self.server_id)
+                self.server_id = await set_server_config(self.guild_id, self.yt_channel_id, self.role_id, self.channel_id, server_id=self.server_id, verification_dm_content=self.verification_dm_content, unsubscribe_dm_content=self.unsubscribe_dm_content)
             
             await self.update_config_display()
         except Exception as e:
@@ -156,7 +246,7 @@ class ConfigSelectView(View):
         server_id = int(interaction.data['values'][0])
         await self.callback(interaction, server_id)
     
-    @discord.ui.button(label="Back", emoji=HOME, style=discord.ButtonStyle.grey)
+    @discord.ui.button(label="Back", emoji=HOME, style=discord.ButtonStyle.grey, row=1)
     async def back_button(self, interaction: discord.Interaction, button: Button):
         try:
             embed = discord.Embed(title=f"{COG} Server Configuration", description="Choose an action to manage your server's YouTube subscriber role settings", color=COLOR)
@@ -264,7 +354,14 @@ class SetupMainView(View):
             if len(configs) == 1:
                 confirm_view = ConfirmDeleteView(self.guild_id, configs[0]['id'])
                 channel_name = await get_youtube_channel_name(configs[0]['yt_channel_id'])
-                embed = discord.Embed(title=f"{WARN} Confirm Deletion", description=f"Are you sure you want to delete this configuration?\n\n{YT} Channel: [{channel_name}](https://www.youtube.com/channel/{configs[0]['yt_channel_id']})\n{ROLE} Role: <@&{configs[0]['role_id']}>\n{LOG} Log Channel: <#{configs[0]['log_channel_id']}>", color=COLOR)
+                embed = discord.Embed(title=f"{WARN} Confirm Deletion", description=f"Are you sure you want to delete this configuration?", color=COLOR)
+                embed.add_field(name=f"YouTube Channel {YT}", value=f"[{channel_name}](https://www.youtube.com/channel/{configs[0]['yt_channel_id']})", inline=False)
+                embed.add_field(name=f"Subscriber Role {ROLE}", value=f"<@&{configs[0]['role_id']}>", inline=False)
+                embed.add_field(name=f"Log Channel {LOG}", value=f"<#{configs[0]['log_channel_id']}>", inline=False)
+                verification_status = f"{configs[0]['verification_dm_content']}" if configs[0].get('verification_dm_content') else f"{CROSS} Disabled"
+                embed.add_field(name=f"Success Message {MAIL} {PREMIUM}", value=verification_status, inline=False)
+                unsubscribe_status = f"{configs[0]['unsubscribe_dm_content']}" if configs[0].get('unsubscribe_dm_content') else f"{CROSS} Disabled"
+                embed.add_field(name=f"Unsubscribe Notification {FLAG} {PREMIUM}", value=unsubscribe_status, inline=False)
                 await interaction.response.edit_message(embed=embed, view=confirm_view)
             else:
                 channel_names = {}
@@ -281,7 +378,14 @@ class SetupMainView(View):
             config = await get_server_config_by_id(server_id)
             channel_name = await get_youtube_channel_name(config['yt_channel_id'])
             confirm_view = ConfirmDeleteView(interaction.guild_id, server_id)
-            embed = discord.Embed(title=f"{WARN} Confirm Deletion", description=f"Are you sure you want to delete this configuration?\n\n{YT} Channel: [{channel_name}](https://www.youtube.com/channel/{config['yt_channel_id']})\n{ROLE} Role: <@&{config['role_id']}>\n{LOG} Log Channel: <#{config['log_channel_id']}>", color=COLOR)
+            embed = discord.Embed(title=f"{WARN} Confirm Deletion", description=f"Are you sure you want to delete this configuration?", color=COLOR)
+            embed.add_field(name=f"YouTube Channel {YT}", value=f"[{channel_name}](https://www.youtube.com/channel/{config['yt_channel_id']})", inline=False)
+            embed.add_field(name=f"Subscriber Role {ROLE}", value=f"<@&{config['role_id']}>", inline=False)
+            embed.add_field(name=f"Log Channel {LOG}", value=f"<#{config['log_channel_id']}>", inline=False)
+            verification_status = f"{config['verification_dm_content']}" if config.get('verification_dm_content') else f"{CROSS} Disabled"
+            embed.add_field(name=f"Success Message {MAIL} {PREMIUM}", value=verification_status, inline=False)
+            unsubscribe_status = f"{config['unsubscribe_dm_content']}" if config.get('unsubscribe_dm_content') else f"{CROSS} Disabled"
+            embed.add_field(name=f"Unsubscribe Notification {FLAG} {PREMIUM}", value=unsubscribe_status, inline=False)
             await interaction.response.edit_message(content=None, embed=embed, view=confirm_view)
         except Exception as e:
             print(f"Error in on_config_selected_for_delete: {e}")
@@ -434,6 +538,7 @@ async def sync_roles():
         yt_channel_id = config['yt_channel_id']
         role_id = config['role_id']
         yt_channel_url = f"https://www.youtube.com/channel/{yt_channel_id}"
+        channel_name = await get_youtube_channel_name(yt_channel_id)
         
         guild = bot.get_guild(guild_id)
         if not guild:
@@ -482,14 +587,23 @@ async def sync_roles():
                         if not is_subscribed and has_role:
                             try:
                                 await member.remove_roles(role)
+                                
+                                if config.get('unsubscribe_dm_content'):
+                                    try:
+                                        dm_embed = discord.Embed(description=config['unsubscribe_dm_content'], color=0xAF4875)
+                                        dm_embed.set_footer(text=f"Sent from {guild.name}")
+                                        await member.send(embed=dm_embed)
+                                    except Exception as e:
+                                        print(f"Error sending unsubscribe DM to {discord_id}: {e}")
+                                
                                 try:
-                                    await log_action(guild_id, f"Removed {role.mention} from <@{discord_id}> because they are no longer subscribed to [{yt_channel_id}]({yt_channel_url}).", discord.Color.orange(), server_id=server_id)
+                                    await log_action(guild_id, f"{NEUTRAL} Removed {role.mention} from <@{discord_id}> because they are no longer subscribed to [{channel_name}]({yt_channel_url}).", discord.Color.red(), server_id=server_id)
                                 except Exception as e:
                                     print(f"Role removed but failed to log: {e}")
                             except discord.errors.Forbidden:
                                 print(f"Failed to remove role from {discord_id}: Bot lacks permission.")
                                 try:
-                                    await log_action(guild_id, f"{WARN} Attempted to remove {role.mention} from <@{discord_id}> for [{yt_channel_id}]({yt_channel_url}) but bot lacks permission in role hierarchy.", discord.Color.red(), server_id=server_id)
+                                    await log_action(guild_id, f"{CROSS} Attempted to remove {role.mention} from <@{discord_id}> for [{channel_name}]({yt_channel_url}) but bot lacks permission in role hierarchy.", discord.Color.orange(), server_id=server_id)
                                 except Exception:
                                     pass
                             
@@ -497,13 +611,13 @@ async def sync_roles():
                             try:
                                 await member.add_roles(role)
                                 try:
-                                    await log_action(guild_id, f"Added {role.mention} to <@{discord_id}> because they subscribed to [{yt_channel_id}]({yt_channel_url}).", discord.Color.green(), server_id=server_id)
+                                    await log_action(guild_id, f"{CHECK} Added {role.mention} to <@{discord_id}> because they subscribed to [{channel_name}]({yt_channel_url}).", discord.Color.green(), server_id=server_id)
                                 except Exception as e:
                                     print(f"Role added but failed to log: {e}")
                             except discord.errors.Forbidden:
                                 print(f"Failed to add role to {discord_id}: Bot lacks permission.")
                                 try:
-                                    await log_action(guild_id, f"{WARN} Attempted to add {role.mention} to <@{discord_id}> for [{yt_channel_id}]({yt_channel_url}) but bot lacks permission in role hierarchy.", discord.Color.red(), server_id=server_id)
+                                    await log_action(guild_id, f"{CROSS} Attempted to add {role.mention} to <@{discord_id}> for [{channel_name}]({yt_channel_url}) but bot lacks permission in role hierarchy.", discord.Color.orange(), server_id=server_id)
                                 except Exception:
                                     pass
                         

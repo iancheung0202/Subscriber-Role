@@ -56,18 +56,19 @@ async def homepage(request: Request):
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Subscriber Role - Home</title>
+        <title>Subscriber Role - Discord Bot</title>
         <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }</style>
     </head>
     <body>
         <h1>Subscriber Role</h1>
         <p>Welcome to the <strong>Subscriber Role</strong> Discord application.</p>
+        <p><a href="https://discord.com/oauth2/authorize?client_id=1490081882140840016">Invite the bot to your server</a> | <a href="https://github.com/iancheung0202/Subscriber-Role">View source code on GitHub</a> | <a href="/privacy">Read the Privacy Policy</a></p>
         <h2>What does this app do?</h2>
-        <p>This application is a Discord bot designed to verify whether a Discord user is subscribed to a specific YouTube channel. It uses the YouTube Data API to securely check the user's subscription status. If verified, the user is automatically granted a designated "Subscriber" role within the Discord server.</p>
-        <h2>How to use it</h2>
-        <p>To use this bot, you must run the <code>/verify</code> command in the designated Discord server. This will provide you with a secure login link to authenticate via your Google account.</p>
-        <hr>
-        <p><a href="/privacy">View our Privacy Policy</a></p>
+        <p>This is a simple Discord bot designed to verify whether a Discord user is subscribed to a specific YouTube channel. It uses the YouTube API to securely check the user's subscription status. If verified, the user is automatically granted a designated "Subscriber" role within the Discord server.</p>
+        <h3>For Server Admins</h3>
+        <p>Run the <code>/setup</code> command (requires administrator permissions) to configure the bot for your server. You'll need to specify a YouTube channel and subscriber role.</p>
+        <h3>For Members</h3>
+        <p>Run the <code>/verify</code> command to link your YouTube account and verify your subscription. You will get the subscriber role as long as you're subscribed to the configured channel.</p>
     </body>
     </html>
     """
@@ -233,6 +234,15 @@ async def callback(request: Request):
             return HTMLResponse(render_page("Permission Error", "Bot lacks permission to assign this role. Please explicitly ensure the bot's role is higher in the hierarchy than the Subscriber role."))
         except Exception as e:
             return HTMLResponse(render_page("Unexpected Error", f"An unexpected error occurred while assigning the role: {e}"))
+        
+        if server_config.get('verification_dm_content'):
+            try:
+                dm_embed = discord.Embed(description=server_config['verification_dm_content'], color=0xAF4875)
+                dm_embed.set_footer(text=f"Sent from {guild.name}")
+                await member.send(embed=dm_embed)
+            except Exception as e:
+                print(f"Error sending verification DM to {discord_id}: {e}")
+        
         try:
             await log_action(guild_id, f"{CHECK} Verified <@{discord_id}> and added {role.mention} for [{channel_name}]({yt_channel_url}).", discord.Color.green(), server_id=server_id)
         except Exception as e:
