@@ -24,19 +24,9 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[os.environ.get("CORS_ORIGIN", "http://subscriber.iancheung.dev")],
-    allow_credentials=True,
-    allow_methods=["GET"],
-    allow_headers=["Content-Type"],
-    max_age=600,
-)
+app.add_middleware(CORSMiddleware, allow_origins=[os.environ.get("CORS_ORIGIN", "http://subscriber.iancheung.dev")], allow_credentials=True, allow_methods=["GET"], allow_headers=["Content-Type"], max_age=600,)
 
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=[os.environ.get("ALLOWED_HOST", "subscriber.iancheung.dev")]
-)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=[os.environ.get("ALLOWED_HOST", "subscriber.iancheung.dev")])
 
 MAX_REQUEST_SIZE = 1_000_000
 
@@ -51,9 +41,7 @@ async def validate_request_size_and_user_agent(request: Request, call_next):
     user_agent = request.headers.get("user-agent", "").lower()
     if any(blocked in user_agent for blocked in BLOCKED_USER_AGENTS):
         return HTMLResponse(content="Access denied", status_code=403)
-    
     response = await call_next(request)
-    
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -137,13 +125,7 @@ def check_youtube_subscription_sync(credentials, channel_id: str):
 
 async def get_tokens(code: str, redirect_uri: str):
     async with aiohttp.ClientSession() as session:
-        data = {
-            "client_id": os.environ["GOOGLE_CLIENT_ID"],
-            "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri
-        }
+        data = {"client_id": os.environ["GOOGLE_CLIENT_ID"], "client_secret": os.environ["GOOGLE_CLIENT_SECRET"], "code": code, "grant_type": "authorization_code", "redirect_uri": redirect_uri}
         async with session.post("https://oauth2.googleapis.com/token", data=data) as response:
             return await response.json()
 
@@ -215,13 +197,7 @@ async def callback(request: Request):
     else:
         await update_user_refresh_token(user_id, refresh_token)
         
-    creds = Credentials(
-        token=access_token,
-        refresh_token=refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=os.environ["GOOGLE_CLIENT_ID"],
-        client_secret=os.environ["GOOGLE_CLIENT_SECRET"]
-    )
+    creds = Credentials(token=access_token, refresh_token=refresh_token, token_uri="https://oauth2.googleapis.com/token", client_id=os.environ["GOOGLE_CLIENT_ID"], client_secret=os.environ["GOOGLE_CLIENT_SECRET"])
     
     is_subscribed = await asyncio.to_thread(check_youtube_subscription_sync, creds, yt_channel_id)
     
@@ -257,12 +233,10 @@ async def callback(request: Request):
             return HTMLResponse(render_page("Permission Error", "Bot lacks permission to assign this role. Please explicitly ensure the bot's role is higher in the hierarchy than the Subscriber role."))
         except Exception as e:
             return HTMLResponse(render_page("Unexpected Error", f"An unexpected error occurred while assigning the role: {e}"))
-
         try:
             await log_action(guild_id, f"{CHECK} Verified <@{discord_id}> and added {role.mention} for [{channel_name}]({yt_channel_url}).", discord.Color.green(), server_id=server_id)
         except Exception as e:
             return HTMLResponse(render_page("Success", f"Success! However, the bot failed to send a log message to the log channel. Please check the log channel permissions. Error: {e}"))
-            
         return HTMLResponse(render_page("Verification Successful", "Success! Your subscription has been verified and you have been granted the role on Discord. You may now close this window."))
     else:
         try:
