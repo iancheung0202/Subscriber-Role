@@ -7,8 +7,8 @@ import urllib.parse
 from discord.ext import commands, tasks
 from discord.ui import View, Button, Modal, TextInput, Select, RoleSelect, ChannelSelect
 
-from database import get_pool, set_server_config, get_all_server_configs, get_user_id, update_subscription_status, get_server_config_by_id, delete_server_config, get_server_configs_for_guild, is_premium, set_premium
-from utils import get_youtube_channel_name, CHECK, NEUTRAL, CROSS, BIN, EDIT, RED_BIN, COG, ADD, ROLE, LOG, YT, WARN, HOME, INFO, FLAG, HELP, PREMIUM, MAIL, COLOR, REPLY
+from database import get_pool, set_server_config, get_all_server_configs, get_user_id, update_subscription_status, get_server_config_by_id, delete_server_config, get_server_configs_for_guild, set_premium
+from utils import get_youtube_channel_name, get_guild_premium_status, SKU_ID, CHECK, NEUTRAL, CROSS, BIN, EDIT, RED_BIN, COG, ADD, ROLE, LOG, YT, WARN, HOME, INFO, FLAG, HELP, PREMIUM, MAIL, COLOR, REPLY
 
 intents = discord.Intents.default()
 
@@ -172,7 +172,8 @@ class ConfigurationEditView(View):
     @discord.ui.button(label="Set Success Message", emoji=MAIL, style=discord.ButtonStyle.grey, row=1)
     async def set_verification_dm(self, interaction: discord.Interaction, button: Button):
         try:
-            if not await is_premium(self.guild_id):
+            has_premium = await get_guild_premium_status(self.guild_id, interaction)
+            if not has_premium:
                 await interaction.response.send_message(embed=discord.Embed(description=f"{PREMIUM} This feature is for Premium servers only.", color=COLOR), ephemeral=True)
                 return
             
@@ -187,7 +188,8 @@ class ConfigurationEditView(View):
     @discord.ui.button(label="Set Unsubscribe Notification", emoji=FLAG, style=discord.ButtonStyle.grey, row=1)
     async def set_unsubscribe_dm(self, interaction: discord.Interaction, button: Button):
         try:
-            if not await is_premium(self.guild_id):
+            has_premium = await get_guild_premium_status(self.guild_id, interaction)
+            if not has_premium:
                 await interaction.response.send_message(embed=discord.Embed(description=f"{PREMIUM} This feature is for Premium servers only.", color=COLOR), ephemeral=True)
                 return
             
@@ -289,8 +291,8 @@ class SetupMainView(View):
     async def add_config(self, interaction: discord.Interaction, button: Button):
         try:
             configs = await get_server_configs_for_guild(self.guild_id)
-            premium = await is_premium(self.guild_id)
-            max_configs = 5 if premium else 1
+            has_premium = await get_guild_premium_status(self.guild_id)
+            max_configs = 5 if has_premium else 1
             
             if len(configs) >= max_configs:
                 await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} You have reached the maximum number of configurations ({max_configs}). Upgrade to {PREMIUM} premium for a total of {max_configs * 5} configurations.", color=COLOR), ephemeral=True)
@@ -400,14 +402,24 @@ async def setup(interaction: discord.Interaction):
     view = SetupMainView(interaction.guild_id)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-@bot.tree.command(name="premium", description="Enable premium for this server. (Owner only)")
+@bot.tree.command(name="premium", description="Enable premium for this server.")
 async def premium(interaction: discord.Interaction):
-    if interaction.user.id != 692254240290242601:
-        await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} Only the bot owner can use this command.", color=COLOR), ephemeral=True)
-        return
+    is_owner = str(interaction.user.id) in os.environ.get("OWNER_IDS", "").split(",")
+    has_premium = await get_guild_premium_status(interaction.guild_id, interaction)
+    store_link = f"https://discord.com/discovery/applications/{bot.user.id}/store/{SKU_ID}"
     
-    await set_premium(interaction.guild_id, True)
-    await interaction.response.send_message(embed=discord.Embed(description=f"{PREMIUM} Premium enabled for this server! You can now add up to 5 YouTube channel configurations.", color=COLOR), ephemeral=True)
+    if is_owner:
+        if has_premium:
+            await interaction.response.send_message(embed=discord.Embed(description=f"{PREMIUM} This server already has premium enabled!", color=COLOR), ephemeral=True)
+        else:
+            await set_premium(interaction.guild_id, True)
+            await interaction.response.send_message(embed=discord.Embed(description=f"{PREMIUM} Premium enabled for this server! You can now add up to 5 YouTube channel configurations with premium features.", color=COLOR), ephemeral=True)
+    else:
+        if has_premium:
+            await interaction.response.send_message(embed=discord.Embed(description=f"{PREMIUM} Thank you! This server already has premium enabled.", color=COLOR), ephemeral=True)
+        else:
+            embed = discord.Embed(title=f"{PREMIUM} Subscriber Role Premium", description=f"Premium unlocks advanced features to supercharge your YouTube community!\n\n{EDIT} Configure up to 5 YouTube channels\n{MAIL} Set verification success messages\n{FLAG} Set unsubscribe notifications", color=COLOR)
+            await interaction.response.send_message(content=store_link, embed=embed, ephemeral=True)
 
 class VerifyChannelSelectView(View):
     def __init__(self, configs, channel_names: dict = None):
@@ -513,6 +525,65 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
     traceback.print_exception(type(error), error, error.__traceback__)
     if not interaction.response.is_done():
         await interaction.response.send_message(f"An error occurred: {error}", ephemeral=True)
+
+@bot.event
+async def on_entitlement_create(entitlement: discord.Entitlement):
+    try:
+        guild_id = entitlement.guild_id
+        if not guild_id:
+            return
+        
+        guild = bot.get_guild(guild_id)
+        if guild:
+            try:
+                configs = await get_server_configs_for_guild(guild_id)
+                if configs and configs[0].get('log_channel_id'):
+                    channel = bot.get_channel(configs[0]['log_channel_id'])
+                    if channel:
+                        embed = discord.Embed(title=f"{PREMIUM} Premium Activated", description=f"Thank you for upgrading to premium in {guild.name}! You can now:\n{EDIT} Configure up to 5 YouTube channels\n{MAIL} Set verification success messages\n{FLAG} Set unsubscribe notifications", color=discord.Color.pink())
+                        await channel.send(embed=embed)
+            except Exception as e:
+                print(f"Error sending premium thank you message: {e}")
+        
+        print(f"Premium entitlement created for guild {guild_id}")
+    except Exception as e:
+        print(f"Error in on_entitlement_create: {e}")
+        traceback.print_exc()
+
+@bot.event
+async def on_entitlement_delete(entitlement: discord.Entitlement):
+    """Handle premium subscription cancellation/expiration"""
+    try:
+        guild_id = entitlement.guild_id
+        if not guild_id:
+            return
+        
+        configs = await get_server_configs_for_guild(guild_id)
+        
+        if configs:
+            if len(configs) > 1:
+                for config in configs[1:]:
+                    await delete_server_config(config['id'])
+            
+            first_config = configs[0]
+            await set_server_config(guild_id, first_config['yt_channel_id'], first_config['role_id'], first_config['log_channel_id'], server_id=first_config['id'], verification_dm_content=None, unsubscribe_dm_content=None)
+        
+        guild = bot.get_guild(guild_id)
+        if guild:
+            try:
+                configs = await get_server_configs_for_guild(guild_id)
+                if configs and configs[0].get('log_channel_id'):
+                    channel = bot.get_channel(configs[0]['log_channel_id'])
+                    if channel:
+                        embed = discord.Embed(title=f"{WARN} Premium Expired", description=f"Your premium subscription for {guild.name} has expired or been cancelled. Premium features are no longer available.", color=discord.Color.light_gray())
+                        await channel.send(embed=embed)
+            except Exception as e:
+                print(f"Error sending premium expiration message: {e}")
+        
+        print(f"Premium entitlement deleted for guild {guild_id}")
+    except Exception as e:
+        print(f"Error in on_entitlement_delete: {e}")
+        traceback.print_exc()
 
 async def log_action(guild_id: int, message: str, color=COLOR, server_id: int = None):
     server_config = await get_server_config_by_id(server_id)
