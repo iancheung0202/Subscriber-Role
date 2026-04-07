@@ -112,7 +112,10 @@ async def privacy_policy(request: Request):
         </ul>
         <p>We do not sell, rent, or share your data with any third parties.</p>
 
-        <h2>3. Data Retention and Deletion</h2>
+        <h2>3. Security and Data Protection</h2>
+        <p>We use encryption to protect your information both in transit and at rest. All data is transmitted securely from your browser, and your OAuth2 refresh tokens are encrypted in our database. We implement security procedures and access controls to protect the confidentiality of your data.</p>
+
+        <h2>4. Data Retention and Deletion</h2>
         <p>Your authentication tokens are stored securely in our database. If you wish to revoke our access at any time, you can do so from your <a href="https://myaccount.google.com/permissions" target="_blank">Google Account Permissions page</a>. Doing so will result in the automatic removal of your "Subscriber" role on Discord during the next automated check.</p>
 
         <footer>
