@@ -57,18 +57,24 @@ async def homepage(request: Request):
     <html>
     <head>
         <title>Subscriber Role - Discord Bot</title>
-        <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }</style>
+        <link rel="icon" href="https://cdn.discordapp.com/avatars/1490081882140840016/72f8e045f550fc5ac768d525f1d60ba7.png?size=32" type="image/png">
+        <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; } a { color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; } a:hover { opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); } a:active { transform: translateY(0); } footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }</style>
     </head>
     <body>
         <h1>Subscriber Role</h1>
         <p>Welcome to the <strong>Subscriber Role</strong> Discord application.</p>
-        <p><a href="https://discord.com/oauth2/authorize?client_id=1490081882140840016">Invite the bot to your server</a> | <a href="https://github.com/iancheung0202/Subscriber-Role">View source code on GitHub</a> | <a href="/privacy">Privacy Policy</a> | <a href="/terms">Terms of Service</a></p>
+        <p><a href="https://discord.com/oauth2/authorize?client_id=1490081882140840016">Invite the bot to your server</a></p>
         <h2>What does this app do?</h2>
         <p>This is a simple Discord bot designed to verify whether a Discord user is subscribed to a specific YouTube channel. It uses the YouTube API to securely check the user's subscription status. If verified, the user is automatically granted a designated "Subscriber" role within the Discord server.</p>
         <h3>For Server Admins</h3>
         <p>Run the <code>/setup</code> command (requires administrator permissions) to configure the bot for your server. You'll need to specify a YouTube channel and subscriber role.</p>
         <h3>For Members</h3>
         <p>Run the <code>/verify</code> command to link your YouTube account and verify your subscription. You will get the subscriber role as long as you're subscribed to the configured channel.</p>
+        
+        <p><a href="https://github.com/iancheung0202/Subscriber-Role">GitHub</a> <a href="/privacy">Privacy Policy</a> <a href="/terms">Terms of Service</a></p>
+        <footer>
+            <p>Developed by Ian Cheung • All rights reserved.</p>
+        </footer>
     </body>
     </html>
     """
@@ -81,10 +87,12 @@ async def privacy_policy(request: Request):
     <html>
     <head>
         <title>Subscriber Role - Privacy Policy</title>
-        <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }</style>
+        <link rel="icon" href="https://cdn.discordapp.com/avatars/1490081882140840016/72f8e045f550fc5ac768d525f1d60ba7.png?size=32" type="image/png">
+        <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; } a { color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; } a:hover { opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); } a:active { transform: translateY(0); } footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }</style>
     </head>
     <body>
         <h1>Privacy Policy for Subscriber Role</h1>
+        <p><a href="/">Return to Home</a></p>
         <p>Last updated: """ + datetime.datetime.now().strftime("%B %d, %Y") + """</p>
         <p>This Privacy Policy explains how the <strong>Subscriber Role</strong> Discord bot collects, uses, and protects your information.</p>
         
@@ -107,8 +115,9 @@ async def privacy_policy(request: Request):
         <h2>3. Data Retention and Deletion</h2>
         <p>Your authentication tokens are stored securely in our database. If you wish to revoke our access at any time, you can do so from your <a href="https://myaccount.google.com/permissions" target="_blank">Google Account Permissions page</a>. Doing so will result in the automatic removal of your "Subscriber" role on Discord during the next automated check.</p>
 
-        <hr>
-        <p><a href="/">Return to Home</a></p>
+        <footer>
+            <p>Developed by Ian Cheung • All rights reserved.</p>
+        </footer>
     </body>
     </html>
     """
@@ -121,10 +130,12 @@ async def terms_of_service(request: Request):
     <html>
     <head>
         <title>Subscriber Role - Terms of Service</title>
-        <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }</style>
+        <link rel="icon" href="https://cdn.discordapp.com/avatars/1490081882140840016/72f8e045f550fc5ac768d525f1d60ba7.png?size=32?size=32" type="image/png">
+        <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; } a { color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; } a:hover { opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); } a:active { transform: translateY(0); } footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }</style>
     </head>
     <body>
         <h1>Terms of Service for Subscriber Role</h1>
+        <p><a href="/">Return to Home</a></p>
         <p>Last updated: """ + datetime.datetime.now().strftime("%B %d, %Y") + """</p>
         <p>By using the <strong>Subscriber Role</strong> Discord bot, you agree to the following terms and conditions.</p>
         
@@ -158,8 +169,9 @@ async def terms_of_service(request: Request):
         <h2>6. Disclaimer</h2>
         <p>This bot is not affiliated with Discord, Google, or YouTube. Discord, Google, and YouTube are trademarks of their respective owners.</p>
 
-        <hr>
-        <p><a href="/">Return to Home</a></p>
+        <footer>
+            <p>Developed by Ian Cheung • All rights reserved.</p>
+        </footer>
     </body>
     </html>
     """
@@ -187,13 +199,16 @@ def render_page(title: str, content: str) -> str:
     <html>
     <head>
         <title>Subscriber Role - {title}</title>
-        <style>body {{ font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; text-align: center; }}</style>
+        <link rel="icon" href="https://cdn.discordapp.com/avatars/1490081882140840016/72f8e045f550fc5ac768d525f1d60ba7.png?size=32" type="image/png">
+        <style>body {{ font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; text-align: center; }} a {{ color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; }} a:hover {{ opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }} a:active {{ transform: translateY(0); }} footer {{ text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }}</style>
     </head>
     <body>
         <h1>{title}</h1>
         <p>{content}</p>
-        <hr>
         <p><a href="/">Return to Home</a></p>
+        <footer>
+            <p>Developed by Ian Cheung • All rights reserved.</p>
+        </footer>
     </body>
     </html>
     """

@@ -8,7 +8,7 @@ from discord.ext import commands, tasks
 from discord.ui import View, Button, Modal, TextInput, Select, RoleSelect, ChannelSelect
 
 from database import get_pool, set_server_config, get_all_server_configs, get_user_id, update_subscription_status, get_server_config_by_id, delete_server_config, get_server_configs_for_guild, is_premium, set_premium
-from utils import get_youtube_channel_name, CHECK, NEUTRAL, CROSS, BIN, EDIT, RED_BIN, COG, ADD, ROLE, LOG, YT, WARN, HOME, INFO, FLAG, HELP, PREMIUM, MAIL, COLOR
+from utils import get_youtube_channel_name, CHECK, NEUTRAL, CROSS, BIN, EDIT, RED_BIN, COG, ADD, ROLE, LOG, YT, WARN, HOME, INFO, FLAG, HELP, PREMIUM, MAIL, COLOR, REPLY
 
 intents = discord.Intents.default()
 
@@ -39,11 +39,11 @@ class YouTubeChannelModal(Modal, title="Configure YouTube Channel"):
             channel_id = self.channel_id.value.strip()
             
             if not channel_id.startswith("UC"):
-                await interaction.followup.send(embed=discord.Embed(description=f"{CROSS} Invalid YouTube channel ID. It must start with 'UC'.\n[How to find my YouTube Channel ID?](https://support.google.com/youtube/answer/3250431) {INFO}", color=COLOR), ephemeral=True)
+                await interaction.followup.send(embed=discord.Embed(description=f"{CROSS} Invalid YouTube channel ID. It must start with 'UC'.\n{REPLY} *[How to find my YouTube Channel ID?](https://support.google.com/youtube/answer/3250431)* {INFO}", color=COLOR), ephemeral=True)
                 return
             
             if len(channel_id) != 24:
-                await interaction.followup.send(embed=discord.Embed(description=f"{CROSS} Invalid YouTube channel ID. It must `24` alphanumeric characters.\n[How to find my YouTube Channel ID?](https://support.google.com/youtube/answer/3250431) {INFO}", color=COLOR), ephemeral=True)
+                await interaction.followup.send(embed=discord.Embed(description=f"{CROSS} Invalid YouTube channel ID. It must be `24` characters long.\n{REPLY} *[How to find my YouTube Channel ID?](https://support.google.com/youtube/answer/3250431)* {INFO}", color=COLOR), ephemeral=True)
                 return
             
             self.parent_view.yt_channel_id = channel_id
