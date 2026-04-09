@@ -3,6 +3,8 @@ import os
 import aiohttp
 import asyncio
 import datetime
+import hmac
+import hashlib
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -276,6 +278,22 @@ async def get_tokens(code: str, redirect_uri: str):
         async with session.post("https://oauth2.googleapis.com/token", data=data) as response:
             return await response.json()
 
+def verify_state_signature(state: str, state_secret: str) -> tuple:
+    try:
+        if '.' not in state:
+            return None
+        state_data, signature = state.rsplit('.', 1)
+        expected_signature = hmac.new(state_secret.encode(), state_data.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected_signature):
+            return None
+        parts = state_data.split("_")
+        if len(parts) != 3:
+            return None
+        guild_id, discord_id, server_id = int(parts[0]), int(parts[1]), int(parts[2])
+        return (guild_id, discord_id, server_id)
+    except (ValueError, IndexError, AttributeError):
+        return None
+
 def render_page(title: str, content: str) -> str:
     return f"""
     <!DOCTYPE html>
@@ -303,18 +321,16 @@ def render_page(title: str, content: str) -> str:
 @limiter.limit("10/minute")
 async def callback(request: Request):
     code = request.query_params.get("code")
-    state = request.query_params.get("state")  # guild_id_discord_id_server_id
+    state = request.query_params.get("state")
     if not code or not state:
         return HTMLResponse(render_page("Invalid Request", "Missing code or state."))
-    try:
-        parts = state.split("_")
-        if len(parts) != 3:
-            raise ValueError("Invalid state format")
-        guild_id = int(parts[0])
-        discord_id = int(parts[1])
-        server_id = int(parts[2])
-    except (ValueError, IndexError):
-        return HTMLResponse(render_page("Invalid Request", "Invalid state parameter."))
+    state_secret = os.environ.get("STATE_SECRET")
+    if not state_secret:
+        return HTMLResponse(render_page("Configuration Error", "Server configuration error. Please try again later."))
+    parsed_state = verify_state_signature(state, state_secret)
+    if not parsed_state:
+        return HTMLResponse(render_page("Invalid Request", "Invalid or tampered state parameter. Please try verification again."))
+    guild_id, discord_id, server_id = parsed_state
     server_config = await get_server_config_by_id(server_id)
     if not server_config:
         return HTMLResponse(render_page("Configuration Error", "This server hasn't been configured yet. Ask an admin to run `/setup`."))

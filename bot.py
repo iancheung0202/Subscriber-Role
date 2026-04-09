@@ -3,6 +3,8 @@ import os
 import asyncio
 import traceback
 import urllib.parse
+import hmac
+import hashlib
 
 from discord.ext import commands, tasks
 from discord.ui import View, Button, Modal, TextInput, Select, RoleSelect, ChannelSelect
@@ -430,7 +432,13 @@ class VerifyChannelSelectView(View):
         guild_id = interaction.guild_id
         client_id = os.environ.get("GOOGLE_CLIENT_ID")
         redirect_uri = os.environ.get("OAUTH_REDIRECT_URI", "http://subscriber.iancheung.dev/callback")
-        state = f"{guild_id}_{interaction.user.id}_{config['id']}"
+        state_secret = os.environ.get("STATE_SECRET")
+        if not state_secret:
+            await interaction.followup.send(embed=discord.Embed(description=f"{CROSS} Server configuration error. Please try again later.", color=COLOR), ephemeral=True)
+            return
+        state_data = f"{guild_id}_{interaction.user.id}_{config['id']}"
+        signature = hmac.new(state_secret.encode(), state_data.encode(), hashlib.sha256).hexdigest()
+        state = f"{state_data}.{signature}"
         params = {"client_id": client_id, "redirect_uri": redirect_uri, "response_type": "code", "scope": "https://www.googleapis.com/auth/youtube.readonly", "access_type": "offline", "prompt": "consent", "state": state}
         url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
         yt_channel_id = config['yt_channel_id']
