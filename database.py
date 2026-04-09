@@ -8,7 +8,6 @@ _init_lock = None
 
 async def init_db():
     global pool, _init_lock
-    
     if _init_lock is None:
         _init_lock = asyncio.Lock()
     async with _init_lock:
@@ -73,5 +72,3 @@ async def get_server_configs_for_guild(guild_id: int):
     pool = await get_pool()
     async with pool.acquire() as connection:
         return await connection.fetch("SELECT id, guild_id, yt_channel_id, role_id, log_channel_id, verification_dm_content, unsubscribe_dm_content FROM servers WHERE guild_id = $1 ORDER BY id", guild_id)
-
-

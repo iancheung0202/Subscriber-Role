@@ -23,13 +23,10 @@ app = FastAPI()
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
 app.add_middleware(CORSMiddleware, allow_origins=[os.environ.get("CORS_ORIGIN", "http://subscriber.iancheung.dev")], allow_credentials=True, allow_methods=["GET"], allow_headers=["Content-Type"], max_age=600,)
-
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=[os.environ.get("ALLOWED_HOST", "subscriber.iancheung.dev")])
 
 MAX_REQUEST_SIZE = 1_000_000
-
 BLOCKED_USER_AGENTS = ["bot", "crawler", "spider", "scraper", "curl", "wget", "python-requests"]
 
 @app.middleware("http")
@@ -37,7 +34,6 @@ async def validate_request_size_and_user_agent(request: Request, call_next):
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > MAX_REQUEST_SIZE:
         return HTMLResponse(content="Request too large", status_code=413)
-    
     user_agent = request.headers.get("user-agent", "").lower()
     if any(blocked in user_agent for blocked in BLOCKED_USER_AGENTS):
         return HTMLResponse(content="Access denied", status_code=403)
@@ -46,7 +42,6 @@ async def validate_request_size_and_user_agent(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    
     return response
 
 @app.get("/", response_class=HTMLResponse)
@@ -102,30 +97,103 @@ async def privacy_policy(request: Request):
         <h1>Privacy Policy for Subscriber Role</h1>
         <p><a href="/">Return to Home</a></p>
         <p>Last updated: """ + datetime.datetime.now().strftime("%B %d, %Y") + """</p>
-        <p>This Privacy Policy explains how the <strong>Subscriber Role</strong> Discord bot collects, uses, and protects your information.</p>
         
+        <h2>Overview</h2>
+        <p><strong>Subscriber Role</strong> operates as a Discord bot and web service that provides subscription verification functionality. This page informs users about our policies regarding the collection, use, and disclosure of personal information. If you use our service, you agree to the collection and use of information as described in this policy. We will not use or share your information with anyone except as described herein.</p>
+
+        <h2>YouTube API and Google Terms of Service</h2>
+        <p>This application makes use of YouTube API services to verify your subscription status. Please review these Google and YouTube's terms and policies:</p>
+        <a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a>
+        <a href="https://www.youtube.com/t/terms" target="_blank">YouTube Terms of Service</a>
+        <p>By using our application and connecting your Google/YouTube account, you agree to be bound by YouTube's Terms of Service and Google's Privacy Policy.</p>
+
         <h2>1. Information We Collect</h2>
         <p>When you use the <code>/verify</code> command and authenticate securely through Google OAuth2, we collect the following:</p>
+        
+        <h3>1.1 Discord Data</h3>
         <ul>
-            <li><strong>Discord ID:</strong> Your unique identifier on Discord, so we know which user to assign the role to.</li>
-            <li><strong>YouTube Subscription Status:</strong> We check if you are subscribed to the required YouTube channel based on your Google account.</li>
-            <li><strong>OAuth2 Refresh Token:</strong> We securely store an offline access token to periodically re-check your subscription status. We do NOT store your Google password or have access to modify your account.</li>
+            <li><strong>Discord ID:</strong> Your unique identifier on Discord, allowing us to assign roles appropriately.</li>
+            <li><strong>Guild and Server Configuration:</strong> Server ID and channel configuration data associated with the Discord server.</li>
         </ul>
+
+        <h3>1.2 Google and YouTube Data</h3>
+        <p>Through the YouTube API, we access the following specific Google user data:</p>
+        <ul>
+            <li><strong>YouTube Subscriptions List:</strong> We retrieve your complete list of YouTube channels you are subscribed to.</li>
+            <li><strong>YouTube Subscription Status:</strong> We determine whether you are subscribed to a specific channel ID provided by the server administrator.</li>
+            <li><strong>OAuth2 Refresh Token:</strong> We securely store an offline access token to periodically re-check your subscription status without requiring re-authentication. </li>
+        </ul>
+        <p><strong>Important:</strong> We only access to view your subscription data. We do <strong>NOT</strong> access your email address, password, personal contact information, watch history, private videos or playlists, YouTube comments, interactions, or any other Google services or data not explicitly listed above.
 
         <h2>2. How We Use Your Information</h2>
         <p>We use your information exclusively to provide the core functionality of the bot:</p>
         <ul>
             <li>To verify your subscription to the required YouTube channel.</li>
             <li>To assign or remove the designated "Subscriber" role automatically in Discord.</li>
+            <li>To maintain your verification status across multiple checks.</li>
         </ul>
-        <p>We do not sell, rent, or share your data with any third parties.</p>
+        <p>We do not sell, rent, lease, or share your data with any third parties. We will not use your information for marketing, advertising, or any purpose other than providing the Subscriber Role service.</p>
 
-        <h2>3. Security and Data Protection</h2>
-        <p>We use encryption to protect your information both in transit and at rest. All data is transmitted securely from your browser, and your OAuth2 refresh tokens are encrypted in our database. We implement security procedures and access controls to protect the confidentiality of your data.</p>
+        <h2>3. Log Data</h2>
+        <p>When you visit or use our service, we automatically collect certain information ("Log Data"). This may include:</p>
+        <ul>
+            <li>Your computer's Internet Protocol (IP) address</li>
+            <li>Browser version and type</li>
+            <li>Pages visited and time spent on each page</li>
+            <li>Date and time of your requests</li>
+            <li>Other statistics and diagnostic information</li>
+        </ul>
+        <p>This information is used to maintain and improve the service, monitor for security threats, and analyze service usage patterns.</p>
 
-        <h2>4. Data Retention and Deletion</h2>
-        <p>Your authentication tokens are stored securely in our database. If you wish to revoke our access at any time, you can do so from your <a href="https://myaccount.google.com/permissions" target="_blank">Google Account Permissions page</a>. Doing so will result in the automatic removal of your "Subscriber" role on Discord during the next automated check.</p>
+        <h2>4. Cookies</h2>
+        <p>Our website may use cookies, which are small data files stored on your computer's hard drive. Cookies help us:</p>
+        <ul>
+            <li>Remember your preferences and settings</li>
+            <li>Improve user experience</li>
+            <li>Protect against unauthorized access</li>
+            <li>Track website performance and analytics</li>
+        </ul>
+        <p>You can choose to accept or refuse cookies through your browser settings. However, refusing cookies may limit your ability to use certain features of our service.</p>
 
+        <h2>5. Security and Data Protection</h2>
+        <p>We value your trust and are committed to protecting your information. We employ industry-standard encryption and security measures:</p>
+        <ul>
+            <li>OAuth2 tokens are encrypted both in transit and at rest in our database</li>
+            <li>All data transmissions use HTTPS/TLS encryption</li>
+            <li>Access to your data is restricted and access-controlled</li>
+            <li>We implement security procedures to protect confidentiality</li>
+        </ul>
+        <p>However, no method of electronic transmission or storage is 100% secure. While we implement reasonable security measures, we cannot guarantee absolute security of your information.</p>
+
+        <h2>6. Data Retention and Deletion</h2>
+        <p>Your authentication tokens are stored securely in our database only as long as necessary to provide the service. If you wish to revoke our access at any time, you can do so from your <a href="https://myaccount.google.com/permissions" target="_blank">Google Account Permissions page</a>. Revoking access will result in:</p>
+        <ul>
+            <li>Automatic removal of your "Subscriber" role on Discord during the next verification check</li>
+            <li>Deletion of your stored refresh token from our database</li>
+            <li>Cessation of all subscription verification checks for your account</li>
+        </ul>
+        <p><strong>Data Requests:</strong> You have the right to request access to, edit, or delete your personal data. All such requests will be processed within 30 days of receipt. To submit a data request, deletion request, or to receive your data package, please contact us at <a href="mailto:ian@iancheung.dev">ian@iancheung.dev</a> with your Discord ID and details of your request.</p>
+
+        <h2>7. Service Providers</h2>
+        <p>We may employ third-party companies and individuals to facilitate our service, including:</p>
+        <ul>
+            <li>Google/YouTube API services for subscription verification</li>
+            <li>Discord API services for role management</li>
+            <li>Hosting and database companies</li>
+        </ul>
+        <p>These third parties have access to your information only to the extent necessary to perform the functions assigned to them and are obligated not to disclose or use the information for any other purpose.</p>
+
+        <h2>8. Children's Privacy</h2>
+        <p>Our service does not address anyone under the age of 13. We do not knowingly collect personal identifiable information from children under 13. If we discover that a child under 13 has provided us with personal information, we will immediately delete this information from our servers. If you are a parent or guardian and believe your child has provided us with information, please contact us immediately.</p>
+
+        <h2>9. Links to Other Sites</h2>
+        <p>Our service may contain links to third-party websites. These external sites are not operated by us, and we are not responsible for their privacy practices, content, or policies. We strongly advise you to review the privacy policies of any third-party sites before providing your information.</p>
+
+        <h2>10. Changes to This Privacy Policy</h2>
+        <p>We may update this Privacy Policy from time to time as our service evolves or in response to changes in law. We will notify you of significant changes by posting the updated policy on this page with an updated "Last updated" date. Continued use of the service after changes constitutes your acceptance of the updated policy.</p>
+
+        <h2>11. Contact Us</h2>
+        <p>If you have any questions, concerns, or suggestions about this Privacy Policy, or if you wish to make a data request, deletion request, or receive your data package, please contact the developer via email at <a href="mailto:ian@iancheung.dev">ian@iancheung.dev</a>.</p>
         <footer>
             <p>Developed by Ian Cheung • All rights reserved.</p>
         </footer>
@@ -236,10 +304,8 @@ def render_page(title: str, content: str) -> str:
 async def callback(request: Request):
     code = request.query_params.get("code")
     state = request.query_params.get("state")  # guild_id_discord_id_server_id
-    
     if not code or not state:
         return HTMLResponse(render_page("Invalid Request", "Missing code or state."))
-    
     try:
         parts = state.split("_")
         if len(parts) != 3:
@@ -249,28 +315,19 @@ async def callback(request: Request):
         server_id = int(parts[2])
     except (ValueError, IndexError):
         return HTMLResponse(render_page("Invalid Request", "Invalid state parameter."))
-    
     server_config = await get_server_config_by_id(server_id)
-    
     if not server_config:
         return HTMLResponse(render_page("Configuration Error", "This server hasn't been configured yet. Ask an admin to run `/setup`."))
-    
     yt_channel_id = server_config['yt_channel_id']
     channel_name = await get_youtube_channel_name(yt_channel_id)
     role_id = server_config['role_id']
-    
     redirect_uri = os.environ.get("OAUTH_REDIRECT_URI", "http://subscriber.iancheung.dev/callback")
-    
     token_response = await get_tokens(code, redirect_uri)
-    
     if "error" in token_response:
         return HTMLResponse(render_page("Authentication Error", f"Error authenticating: {token_response.get('error_description', 'Unknown error')}"))
-        
     access_token = token_response.get("access_token")
     refresh_token = token_response.get("refresh_token")
-    
     user_id = await get_user_id(guild_id, discord_id)
-    
     if not refresh_token:
         pool = await get_pool()
         async with pool.acquire() as connection:
@@ -281,17 +338,12 @@ async def callback(request: Request):
                 return HTMLResponse(render_page("Access Denied", "Could not retrieve a refresh token. Please re-authenticate and make sure to allow offline access."))
     else:
         await update_user_refresh_token(user_id, refresh_token)
-        
     creds = Credentials(token=access_token, refresh_token=refresh_token, token_uri="https://oauth2.googleapis.com/token", client_id=os.environ["GOOGLE_CLIENT_ID"], client_secret=os.environ["GOOGLE_CLIENT_SECRET"])
-    
     is_subscribed = await asyncio.to_thread(check_youtube_subscription_sync, creds, yt_channel_id)
-    
     await update_subscription_status(user_id, server_id, yt_channel_id, is_subscribed)
-    
     guild = bot.get_guild(guild_id)
     if not guild:
         return HTMLResponse(render_page("Bot Error", "Internal bot error: Cannot find Discord server."))
-    
     try:
         member = await guild.fetch_member(discord_id)
     except discord.errors.NotFound:
@@ -300,13 +352,10 @@ async def callback(request: Request):
         return HTMLResponse(render_page("Permission Error", "Bot lacks permission to fetch users from the Discord server. (Is Server Members intent enabled?)"))
     except Exception as e:
         return HTMLResponse(render_page("Unexpected Error", f"An unexpected error occurred while fetching your Discord profile: {e}"))
-        
     role = guild.get_role(role_id)
     if not role:
         return HTMLResponse(render_page("Role Not Found", "Internal bot error: Cannot find the specified role."))
-    
     yt_channel_url = f"https://www.youtube.com/channel/{yt_channel_id}"
-        
     if is_subscribed:
         try:
             await member.add_roles(role)
@@ -318,7 +367,6 @@ async def callback(request: Request):
             return HTMLResponse(render_page("Permission Error", "Bot lacks permission to assign this role. Please explicitly ensure the bot's role is higher in the hierarchy than the Subscriber role."))
         except Exception as e:
             return HTMLResponse(render_page("Unexpected Error", f"An unexpected error occurred while assigning the role: {e}"))
-        
         if server_config.get('verification_dm_content'):
             try:
                 dm_embed = discord.Embed(description=server_config['verification_dm_content'], color=0xAF4875)
@@ -326,7 +374,6 @@ async def callback(request: Request):
                 await member.send(embed=dm_embed)
             except Exception as e:
                 print(f"Error sending verification DM to {discord_id}: {e}")
-        
         try:
             await log_action(guild_id, f"{CHECK} Verified <@{discord_id}> and added {role.mention} for [{channel_name}]({yt_channel_url}).", discord.Color.green(), server_id=server_id)
         except Exception as e:

@@ -151,11 +151,7 @@ class ConfigurationEditView(View):
     @discord.ui.button(label="Back", emoji=HOME, style=discord.ButtonStyle.grey)
     async def back_button(self, interaction: discord.Interaction, button: Button):
         try:
-            embed = discord.Embed(
-                title=f"{COG} Server Configuration",
-                description="Choose an action to manage your server's YouTube subscriber role settings",
-                color=COLOR
-            )
+            embed = discord.Embed(title=f"{COG} Server Configuration", description="Choose an action to manage your server's YouTube subscriber role settings", color=COLOR)
             view = SetupMainView(self.guild_id)
             await interaction.response.edit_message(embed=embed, view=view)
         except Exception as e:
