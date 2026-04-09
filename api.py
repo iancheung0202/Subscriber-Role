@@ -54,8 +54,12 @@ async def validate_request_size_and_user_agent(request: Request, call_next):
 async def homepage(request: Request):
     return """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="Verify YouTube channel subscriptions and automatically assign Discord roles with Subscriber Role bot.">
+        <meta name="theme-color" content="#af4875">
         <title>Subscriber Role - Discord Bot</title>
         <link rel="icon" href="https://cdn.discordapp.com/avatars/1490081882140840016/72f8e045f550fc5ac768d525f1d60ba7.png?size=32" type="image/png">
         <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; } a { color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; } a:hover { opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); } a:active { transform: translateY(0); } footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }</style>
@@ -84,8 +88,12 @@ async def homepage(request: Request):
 async def privacy_policy(request: Request):
     return """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="Privacy policy for Subscriber Role Discord bot. Learn how we handle your data.">
+        <meta name="theme-color" content="#af4875">
         <title>Subscriber Role - Privacy Policy</title>
         <link rel="icon" href="https://cdn.discordapp.com/avatars/1490081882140840016/72f8e045f550fc5ac768d525f1d60ba7.png?size=32" type="image/png">
         <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; } a { color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; } a:hover { opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); } a:active { transform: translateY(0); } footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }</style>
@@ -130,10 +138,14 @@ async def privacy_policy(request: Request):
 async def terms_of_service(request: Request):
     return """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="Terms of service for Subscriber Role Discord bot. Read our usage policies and terms.">
+        <meta name="theme-color" content="#af4875">
         <title>Subscriber Role - Terms of Service</title>
-        <link rel="icon" href="https://cdn.discordapp.com/avatars/1490081882140840016/72f8e045f550fc5ac768d525f1d60ba7.png?size=32?size=32" type="image/png">
+        <link rel="icon" href="https://cdn.discordapp.com/avatars/1490081882140840016/72f8e045f550fc5ac768d525f1d60ba7.png?size=32" type="image/png">
         <style>body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; } a { color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; } a:hover { opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); } a:active { transform: translateY(0); } footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }</style>
     </head>
     <body>
@@ -199,8 +211,11 @@ async def get_tokens(code: str, redirect_uri: str):
 def render_page(title: str, content: str) -> str:
     return f"""
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="theme-color" content="#af4875">
         <title>Subscriber Role - {title}</title>
         <link rel="icon" href="https://cdn.discordapp.com/avatars/1490081882140840016/72f8e045f550fc5ac768d525f1d60ba7.png?size=32" type="image/png">
         <style>body {{ font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; text-align: center; }} a {{ color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; }} a:hover {{ opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }} a:active {{ transform: translateY(0); }} footer {{ text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }}</style>

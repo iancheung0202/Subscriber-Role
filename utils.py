@@ -3,8 +3,6 @@ import discord
 
 from googleapiclient.discovery import build
 
-from database import is_premium
-
 async def get_youtube_channel_name(channel_id: str) -> str:
     try:
         youtube = build('youtube', 'v3', developerKey=os.environ.get("GOOGLE_API_KEY"))
@@ -38,19 +36,12 @@ MAIL = "<:mail:1490844152827613354>"
 REPLY = "<:reply:1036792837821435976>"
 
 COLOR = 0xAF4875
-SKU_ID = os.environ.get("DISCORD_PREMIUM_SKU_ID")
+SKU_ID = int(os.environ.get("DISCORD_PREMIUM_SKU_ID", 0))
 
-async def check_guild_premium_entitlements(interaction: discord.Interaction) -> bool:
-    if not interaction.entitlements:
+async def is_guild_premium(interaction: discord.Interaction) -> bool:
+    if not interaction or not interaction.entitlements:
         return False
     for entitlement in interaction.entitlements:
         if entitlement.sku_id == SKU_ID and entitlement.guild_id == interaction.guild_id:
             return True
     return False
-
-async def get_guild_premium_status(guild_id: int, interaction: discord.Interaction = None) -> bool:
-    if interaction:
-        has_entitlement = await check_guild_premium_entitlements(interaction)
-        if has_entitlement:
-            return True
-    return await is_premium(guild_id)

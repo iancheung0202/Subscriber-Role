@@ -19,7 +19,6 @@ async def init_db():
             await connection.execute("CREATE TABLE IF NOT EXISTS servers (id SERIAL PRIMARY KEY, guild_id BIGINT NOT NULL, yt_channel_id TEXT NOT NULL, role_id BIGINT NOT NULL, log_channel_id BIGINT, verification_dm_content TEXT, unsubscribe_dm_content TEXT)")
             await connection.execute("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, guild_id BIGINT NOT NULL, discord_id BIGINT NOT NULL, refresh_token TEXT, UNIQUE(guild_id, discord_id))")
             await connection.execute("CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER NOT NULL, server_id INTEGER NOT NULL, yt_channel_id TEXT NOT NULL, is_subscribed BOOLEAN, last_checked TIMESTAMP, PRIMARY KEY (user_id, server_id), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE)")
-            await connection.execute("CREATE TABLE IF NOT EXISTS premium (guild_id BIGINT PRIMARY KEY, is_premium BOOLEAN NOT NULL DEFAULT FALSE)")
         
 async def get_pool():
     global pool
@@ -75,13 +74,4 @@ async def get_server_configs_for_guild(guild_id: int):
     async with pool.acquire() as connection:
         return await connection.fetch("SELECT id, guild_id, yt_channel_id, role_id, log_channel_id, verification_dm_content, unsubscribe_dm_content FROM servers WHERE guild_id = $1 ORDER BY id", guild_id)
 
-async def is_premium(guild_id: int):
-    pool = await get_pool()
-    async with pool.acquire() as connection:
-        result = await connection.fetchval("SELECT is_premium FROM premium WHERE guild_id = $1", guild_id)
-        return result is True
 
-async def set_premium(guild_id: int, premium: bool = True):
-    pool = await get_pool()
-    async with pool.acquire() as connection:
-        await connection.execute("INSERT INTO premium (guild_id, is_premium) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET is_premium = $2", guild_id, premium)
