@@ -214,7 +214,8 @@ class ConfigurationEditView(View):
     async def select_channel(self, interaction: discord.Interaction, select: Select):
         try:
             channel = select.values[0]
-            bot_perms = channel.permissions_for(interaction.guild.me)
+            actual_channel = interaction.guild.get_channel(channel.id)
+            bot_perms = actual_channel.permissions_for(interaction.guild.me)
             if not bot_perms.send_messages or not bot_perms.embed_links:
                 missing_perms = []
                 if not bot_perms.send_messages:

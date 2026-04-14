@@ -28,7 +28,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(CORSMiddleware, allow_origins=[os.environ.get("CORS_ORIGIN", "http://subscriber.iancheung.dev")], allow_credentials=True, allow_methods=["GET"], allow_headers=["Content-Type"], max_age=600,)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=[os.environ.get("ALLOWED_HOST", "subscriber.iancheung.dev")])
 
-BOT_AVATAR = "https://cdn.discordapp.com/avatars/1490081882140840016/a_9c8b1e5c9c3f0b2e311d0a7bfa4a1f.gif"
+BOT_AVATAR = "https://iancheung.dev/assets/img/subscriber-role.png"
 
 def generate_page(title: str, description: str, url: str, body_html: str, centered: bool = False) -> str:
     if centered:
