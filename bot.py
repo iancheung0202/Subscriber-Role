@@ -384,7 +384,7 @@ class SetupMainView(View):
 
 @bot.tree.command(name="setup", description="Configure the bot for your server. (Admin only)")
 async def setup(interaction: discord.Interaction):
-    if not interaction.permissions.administrator:
+    if not (interaction.permissions.administrator or str(interaction.user.id) in os.environ.get("OWNER_IDS", "").split(",")):
         await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} You need administrator permissions to run this command.", color=COLOR), ephemeral=True)
         return
     embed = discord.Embed(title=f"{COG} Server Configuration", description="Choose an action below to manage your server's YouTube subscriber role settings!", color=COLOR)
@@ -454,11 +454,7 @@ class VerifyChannelSelectView(View):
             status_embed.add_field(name=f"Status", value=f"{status_emoji} {'Subscribed' if user_subscription['is_subscribed'] else 'Not Subscribed'}", inline=False)
             status_embed.add_field(name=f"Last Checked", value=last_checked, inline=False)
             embeds.append(status_embed)
-        try:
-            video_file = discord.File("demo.mp4")
-            await interaction.response.send_message(embeds=embeds, file=video_file, ephemeral=True)
-        except FileNotFoundError:
-            await interaction.response.send_message(embeds=embeds, ephemeral=True)
+        await interaction.response.send_message(embeds=embeds, ephemeral=True)
 
 @bot.tree.command(name="verify", description="Link your YouTube account to verify your subscription.")
 async def verify(interaction: discord.Interaction):
