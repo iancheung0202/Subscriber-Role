@@ -4,7 +4,7 @@
 [![Discord](https://img.shields.io/badge/Invite%20Discord%20Bot-5865F2)](https://discord.com/oauth2/authorize?client_id=1490081882140840016)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
-> A Discord bot that verifies YouTube channel subscriptions and automatically assigns a role to subscribers, that simple.
+> A Discord bot that verifies YouTube channel subscriptions and automatically assigns a role to subscribers. That's it.
 
 ## Overview
 
@@ -30,43 +30,9 @@
 | `database.py` | Database interactions (tokens, server configs) |
 | `utils.py` | Shared helpers (YouTube API calls, role management) |
 
-## Getting Started
-
-First, you will need:
-- A [Discord application & bot token](https://discord.com/developers/applications)
-- A [Google Cloud project](https://console.cloud.google.com/) with the **YouTube Data API v3** enabled
-- Google OAuth2 credentials (Client ID & Client Secret)
-- A publicly accessible URL for the OAuth2 redirect
-
-Install and clone the project with these terminal commands:
-
-```bash
-git clone https://github.com/iancheung0202/Subscriber-Role.git
-cd Subscriber-Role
-pip install -r requirements.txt
-```
-
-Then, copy the example environment file and fill in your values:
-
-```bash
-cp .env.example .env
-```
-
-In `.env`, fill in your credentials:
-
-```env
-DISCORD_TOKEN=your_discord_bot_token
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-REDIRECT_URI=https://your-domain.com/callback
-DATABASE_URL=your_database_connection_string
-```
-
-Finally, run the application:
-
-```bash
-python main.py
-```
+## Self-Hosting
+ 
+This project is licensed under the **AGPL-3.0**, which means you are free to fork and self-host this bot. However, the setup involves multiple external services (Discord, Google Cloud, YouTube Data API, a database, and a publicly accessible server) and is non-trivial. **No support will be provided for self-hosting.** You're on your own.
 
 ## Privacy & Data
 
