@@ -294,7 +294,10 @@ class SetupMainView(View):
             has_premium = await is_guild_premium(interaction)
             max_configs = 5 if has_premium else 1
             if len(configs) >= max_configs:
-                await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} You have reached the maximum number of configurations ({max_configs}). Upgrade to {PREMIUM} premium for a total of {max_configs * 5} configurations.", color=COLOR), ephemeral=True)
+                if not has_premium:
+                    await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} You have reached the maximum number of configurations ({max_configs}). Upgrade to {PREMIUM} premium for a total of {max_configs * 5} configurations.", color=COLOR), ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=discord.Embed(description=f"{CROSS} You have reached the maximum number of configurations ({max_configs}). Remove some configurations to add more.", color=COLOR), ephemeral=True)
                 return
             view = ConfigurationEditView(self.guild_id)
             embed = await view.get_status_embed()
