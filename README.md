@@ -31,7 +31,7 @@
 | `utils.py` | Shared helpers (YouTube API calls, role management) |
 
 ## Self-Hosting
- 
+
 This project is licensed under the **AGPL-3.0**, which means you are free to fork and self-host this bot. However, the setup involves multiple external services (Discord, Google Cloud, YouTube Data API, a database, and a publicly accessible server) and is non-trivial. **No support will be provided for self-hosting.** You're on your own.
 
 ## Privacy & Data

@@ -1,19 +1,21 @@
 import os
-import discord
 
+import discord
 from googleapiclient.discovery import build
+
 
 async def get_youtube_channel_name(channel_id: str) -> str:
     try:
-        youtube = build('youtube', 'v3', developerKey=os.environ.get("GOOGLE_API_KEY"))
+        youtube = build("youtube", "v3", developerKey=os.environ.get("GOOGLE_API_KEY"))
         request = youtube.channels().list(part="snippet", id=channel_id)
         response = request.execute()
         items = response.get("items", [])
         if items:
-            return items[0]['snippet']['title']
+            return items[0]["snippet"]["title"]
     except Exception as e:
         print(f"Error fetching YouTube channel name for {channel_id}: {e}")
     return "Unknown Channel"
+
 
 CHECK = "<:checkmark:1490467092296761384>"
 NEUTRAL = "<:neutralmark:1490467105701756979>"
@@ -38,10 +40,14 @@ REPLY = "<:reply:1036792837821435976>"
 COLOR = 0xAF4875
 SKU_ID = int(os.environ.get("DISCORD_PREMIUM_SKU_ID", 0))
 
+
 async def is_guild_premium(interaction: discord.Interaction) -> bool:
     if not interaction or not interaction.entitlements:
         return False
     for entitlement in interaction.entitlements:
-        if entitlement.sku_id == SKU_ID and entitlement.guild_id == interaction.guild_id:
+        if (
+            entitlement.sku_id == SKU_ID
+            and entitlement.guild_id == interaction.guild_id
+        ):
             return True
     return False
