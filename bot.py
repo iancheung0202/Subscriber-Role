@@ -16,6 +16,7 @@ from googleapiclient.errors import HttpError
 
 from database import (
     claim_account_hash,
+    clear_user_refresh_token,
     decrypt_token,
     delete_server_config,
     get_all_server_configs,
@@ -1367,6 +1368,9 @@ PREMIUM_RECHECK_HOURS = 10
 QUOTA_REASONS = ("quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded")
 
 
+REVOKED = {}
+
+
 class QuotaExhausted(Exception):
     pass
 
@@ -1389,7 +1393,7 @@ def check_subscription(refresh_token: str, yt_channel_id: str, discord_id: int):
         return items[0]["snippet"] if items else False
     except RefreshError as e:
         if "invalid_grant" in str(e):
-            return False
+            return REVOKED
         print(f"Could not refresh token for {discord_id}: {e}")
         return None
     except HttpError as e:
@@ -1454,6 +1458,8 @@ async def sync_member(row, target: dict, stats: dict):
         stats["failed"] += 1
         return
     is_subscribed = bool(snippet)
+    if snippet is REVOKED:
+        await clear_user_refresh_token(user_id)
     if is_subscribed and not row["yt_account_hash"] and snippet.get("channelId"):
         await claim_account_hash(user_id, guild_id, hash_account(snippet["channelId"]))
     try:

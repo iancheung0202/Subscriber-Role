@@ -259,7 +259,7 @@ def check_subscriptions(credentials, channel_id: str):
         return items[0]["snippet"] if items else False
     except Exception as e:
         print(f"Error checking sub status: {e}")
-        return False
+        return None
 
 
 async def get_tokens(code: str, redirect_uri: str):
@@ -382,6 +382,13 @@ async def callback(request: Request):
         client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     )
     snippet = await asyncio.to_thread(check_subscriptions, creds, yt_channel_id)
+    if snippet is None:
+        return HTMLResponse(
+            render_response(
+                "Verification Unavailable",
+                "We could not check your subscription right now. Please try again later.",
+            )
+        )
     is_subscribed = bool(snippet)
     guild = bot.get_guild(guild_id)
     if not guild:
