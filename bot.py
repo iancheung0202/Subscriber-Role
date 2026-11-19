@@ -1144,6 +1144,9 @@ class VerifyChannelSelectView(View):
             color=COLOR,
         )
         embeds = [embed]
+        notice = os.environ.get("SITE_NOTICE")
+        if notice:
+            embeds.insert(0, discord.Embed(description=f"{WARN} {notice}", color=COLOR))
         if user_subscription:
             status_emoji = (
                 f"{CHECK}" if user_subscription["is_subscribed"] else f"{CROSS}"

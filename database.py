@@ -103,6 +103,9 @@ async def init_db():
             await connection.execute(
                 "CREATE TABLE IF NOT EXISTS tiers (server_id INTEGER NOT NULL, days INTEGER NOT NULL, role_id BIGINT NOT NULL, PRIMARY KEY (server_id, days), FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE)"
             )
+            await connection.execute(
+                "CREATE TABLE IF NOT EXISTS channel_names (yt_channel_id TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at TIMESTAMP NOT NULL)"
+            )
             await _encrypt_existing_tokens(connection)
         pool = new_pool
 
@@ -317,4 +320,24 @@ async def set_stack_tiers(server_id: int, stack_tiers: bool):
     async with pool.acquire() as connection:
         await connection.execute(
             "UPDATE servers SET stack_tiers = $1 WHERE id = $2", stack_tiers, server_id
+        )
+
+
+async def get_channel_name(yt_channel_id: str):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        return await connection.fetchrow(
+            "SELECT name, updated_at FROM channel_names WHERE yt_channel_id = $1",
+            yt_channel_id,
+        )
+
+
+async def set_channel_name(yt_channel_id: str, name: str):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "INSERT INTO channel_names (yt_channel_id, name, updated_at) VALUES ($1, $2, $3) ON CONFLICT (yt_channel_id) DO UPDATE SET name = EXCLUDED.name, updated_at = EXCLUDED.updated_at",
+            yt_channel_id,
+            name,
+            datetime.datetime.now(),
         )

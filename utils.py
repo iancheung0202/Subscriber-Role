@@ -1,12 +1,13 @@
 import asyncio
+import datetime
 import os
-import time
 
 import discord
 from googleapiclient.discovery import build
 
-CHANNEL_NAME_TTL = 6 * 60 * 60
-_channel_names = {}
+from database import get_channel_name, set_channel_name
+
+CHANNEL_NAME_TTL = datetime.timedelta(hours=24)
 
 
 def fetch_youtube_channel_name(channel_id: str):
@@ -20,17 +21,17 @@ def fetch_youtube_channel_name(channel_id: str):
 
 
 async def get_youtube_channel_name(channel_id: str) -> str:
-    cached = _channel_names.get(channel_id)
-    if cached and time.monotonic() - cached[1] < CHANNEL_NAME_TTL:
-        return cached[0]
+    cached = await get_channel_name(channel_id)
+    if cached and datetime.datetime.now() - cached["updated_at"] < CHANNEL_NAME_TTL:
+        return cached["name"]
     try:
         name = await asyncio.to_thread(fetch_youtube_channel_name, channel_id)
         if name:
-            _channel_names[channel_id] = (name, time.monotonic())
+            await set_channel_name(channel_id, name)
             return name
     except Exception as e:
         print(f"Error fetching YouTube channel name for {channel_id}: {e}")
-    return cached[0] if cached else "Unknown Channel"
+    return cached["name"] if cached else "Unknown Channel"
 
 
 CHECK = "<:checkmark:1490467092296761384>"
