@@ -65,7 +65,7 @@ TIER_DURATIONS = {
     1460: "4 years",
     1825: "5 years",
 }
-PREMIUM_PERKS = f"{EDIT} Configure up to 5 YouTube channels\n{MAIL} Set verification success messages\n{FLAG} Set unsubscribe notifications\n{YT} Priority and more frequent subscription checks\n{ROLE} Reward long-time subscribers with tier roles"
+PREMIUM_PERKS = f"{YT} Configure up to 5 YouTube channels\n{MAIL} Set verification success messages\n{FLAG} Set unsubscribe notifications\n{EDIT} Priority and more frequent subscription checks\n{ROLE} Reward long-time subscribers with tier roles"
 SKU_ID = int(os.environ.get("DISCORD_PREMIUM_SKU_ID", 0))
 
 

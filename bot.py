@@ -142,11 +142,11 @@ async def on_app_command_completion(
     where = describe_guild(interaction.guild) if interaction.guild else "a DM"
     await owner_log(
         "COMMAND_LOG_CHANNEL_ID",
-        f"{ADD} `/{command.qualified_name}` by <@{interaction.user.id}> in {where}.",
+        f"{ADD} `/{command.qualified_name}`\n{ROLE} <@{interaction.user.id}>\n{LOG} {where}.",
     )
 
 
-class YouTubeChannelModal(Modal, title="Configure YouTube Channel"):
+class YouTubeChannelModal(Modal, title="Set YouTube Channel"):
     def __init__(self, parent_view: "ConfigurationEditView", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.parent_view = parent_view
@@ -167,7 +167,7 @@ class YouTubeChannelModal(Modal, title="Configure YouTube Channel"):
             if not channel_id.startswith("UC"):
                 await interaction.followup.send(
                     embed=discord.Embed(
-                        description=f"{CROSS} Invalid YouTube channel ID. It must start with 'UC'.\n{REPLY} *[How to find my YouTube Channel ID?](https://support.google.com/youtube/answer/3250431)* {INFO}",
+                        description=f"{CROSS} Invalid YouTube channel ID. It must start with 'UC'.\n{REPLY} *[How to find my Channel ID?](https://support.google.com/youtube/answer/3250431)* {INFO}",
                         color=COLOR,
                     ),
                     ephemeral=True,
@@ -176,7 +176,7 @@ class YouTubeChannelModal(Modal, title="Configure YouTube Channel"):
             if len(channel_id) != 24:
                 await interaction.followup.send(
                     embed=discord.Embed(
-                        description=f"{CROSS} Invalid YouTube channel ID. It must be `24` characters long.\n{REPLY} *[How to find my YouTube Channel ID?](https://support.google.com/youtube/answer/3250431)* {INFO}",
+                        description=f"{CROSS} Invalid YouTube channel ID. It must be `24` characters long.\n{REPLY} *[How to find my Channel ID?](https://support.google.com/youtube/answer/3250431)* {INFO}",
                         color=COLOR,
                     ),
                     ephemeral=True,
@@ -315,7 +315,7 @@ class ConfigurationEditView(View):
             channel_name = await get_youtube_channel_name(self.yt_channel_id)
             yt_status = f"{CHECK} [{channel_name}]({yt_url})"
         else:
-            yt_status = f"{CROSS} Not set"
+            yt_status = f"{CROSS} Not set. [How to find my Channel ID?](https://support.google.com/youtube/answer/3250431)."
         embed.add_field(name=f"YouTube Channel {YT}", value=yt_status, inline=False)
         role_status = (
             f"{CHECK} <@&{self.role_id}>" if self.role_id else f"{CROSS} Not set"
@@ -366,127 +366,7 @@ class ConfigurationEditView(View):
         except Exception as e:
             print(f"Error updating config display: {e}")
 
-    @discord.ui.button(
-        label="Set YouTube Channel", emoji=YT, style=discord.ButtonStyle.grey
-    )
-    async def set_channel(self, interaction: discord.Interaction, button: Button):
-        try:
-            modal = YouTubeChannelModal(self, title="Configure YouTube Channel")
-            self.last_interaction = interaction
-            await interaction.response.send_modal(modal)
-        except Exception as e:
-            print(f"Error in set_channel: {e}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    embed=discord.Embed(description=f"{CROSS} Error: {e}", color=COLOR),
-                    ephemeral=True,
-                )
-
-    @discord.ui.button(label="Back", emoji=HOME, style=discord.ButtonStyle.grey)
-    async def back_button(self, interaction: discord.Interaction, button: Button):
-        try:
-            embed = discord.Embed(
-                title=f"{COG} Server Configuration",
-                description="Choose an action to manage your server's YouTube subscriber role settings",
-                color=COLOR,
-            )
-            view = SetupMainView(self.guild_id)
-            await interaction.response.edit_message(embed=embed, view=view)
-        except Exception as e:
-            print(f"Error in back_button: {e}")
-
-    @discord.ui.button(
-        label="Set Success Message", emoji=MAIL, style=discord.ButtonStyle.grey, row=1
-    )
-    async def set_verification_dm(
-        self, interaction: discord.Interaction, button: Button
-    ):
-        try:
-            has_premium = await is_guild_premium(interaction)
-            if not has_premium:
-                await interaction.response.send_message(
-                    embed=discord.Embed(
-                        description=f"{PREMIUM} This feature is for Premium servers only.",
-                        color=COLOR,
-                    ),
-                    ephemeral=True,
-                )
-                return
-            modal = VerificationDMModal(self, title="Set Verification Message")
-            self.last_interaction = interaction
-            await interaction.response.send_modal(modal)
-        except Exception as e:
-            print(f"Error in set_verification_dm: {e}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    embed=discord.Embed(description=f"{CROSS} Error: {e}", color=COLOR),
-                    ephemeral=True,
-                )
-
-    @discord.ui.button(
-        label="Set Unsubscribe Notification",
-        emoji=FLAG,
-        style=discord.ButtonStyle.grey,
-        row=1,
-    )
-    async def set_unsubscribe_dm(
-        self, interaction: discord.Interaction, button: Button
-    ):
-        try:
-            has_premium = await is_guild_premium(interaction)
-            if not has_premium:
-                await interaction.response.send_message(
-                    embed=discord.Embed(
-                        description=f"{PREMIUM} This feature is for Premium servers only.",
-                        color=COLOR,
-                    ),
-                    ephemeral=True,
-                )
-                return
-            modal = UnsubscribeDMModal(self, title="Set Unsubscribe Notification")
-            self.last_interaction = interaction
-            await interaction.response.send_modal(modal)
-        except Exception as e:
-            print(f"Error in set_unsubscribe_dm: {e}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    embed=discord.Embed(description=f"{CROSS} Error: {e}", color=COLOR),
-                    ephemeral=True,
-                )
-
-    @discord.ui.button(
-        label="Set Tier Roles", emoji=ROLE, style=discord.ButtonStyle.grey, row=1
-    )
-    async def set_tier_roles(self, interaction: discord.Interaction, button: Button):
-        try:
-            has_premium = await is_guild_premium(interaction)
-            if not has_premium:
-                await interaction.response.send_message(
-                    embed=discord.Embed(
-                        description=f"{PREMIUM} This feature is for Premium servers only.",
-                        color=COLOR,
-                    ),
-                    ephemeral=True,
-                )
-                return
-            if not self.server_id:
-                await interaction.response.send_message(
-                    embed=discord.Embed(
-                        description=f"{CROSS} Set the YouTube channel and subscriber role first.",
-                        color=COLOR,
-                    ),
-                    ephemeral=True,
-                )
-                return
-            config = await get_server_config_by_id(self.server_id)
-            view = TierRolesView(
-                self, await get_tiers(self.server_id), config["stack_tiers"]
-            )
-            await interaction.response.edit_message(embed=view.get_embed(), view=view)
-        except Exception as e:
-            print(f"Error in set_tier_roles: {e}")
-
-    @discord.ui.select(cls=RoleSelect, placeholder="Select subscriber role")
+    @discord.ui.select(cls=RoleSelect, placeholder="Pick a subscriber role")
     async def select_role(self, interaction: discord.Interaction, select: Select):
         try:
             selected_role = select.values[0]
@@ -530,7 +410,7 @@ class ConfigurationEditView(View):
             print(f"Error in select_role: {e}")
 
     @discord.ui.select(
-        cls=ChannelSelect, placeholder="Select log channel", min_values=1, max_values=1
+        cls=ChannelSelect, placeholder="Pick a log channel", min_values=1, max_values=1
     )
     async def select_channel(self, interaction: discord.Interaction, select: Select):
         try:
@@ -568,6 +448,126 @@ class ConfigurationEditView(View):
         except Exception as e:
             print(f"Error in select_channel: {e}")
 
+    @discord.ui.button(
+        label="Set YouTube Channel", emoji=YT, style=discord.ButtonStyle.grey, row=2
+    )
+    async def set_channel(self, interaction: discord.Interaction, button: Button):
+        try:
+            modal = YouTubeChannelModal(self, title="Configure YouTube Channel")
+            self.last_interaction = interaction
+            await interaction.response.send_modal(modal)
+        except Exception as e:
+            print(f"Error in set_channel: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    embed=discord.Embed(description=f"{CROSS} Error: {e}", color=COLOR),
+                    ephemeral=True,
+                )
+
+    @discord.ui.button(
+        label="Set Success Message", emoji=MAIL, style=discord.ButtonStyle.grey, row=2
+    )
+    async def set_verification_dm(
+        self, interaction: discord.Interaction, button: Button
+    ):
+        try:
+            has_premium = await is_guild_premium(interaction)
+            if not has_premium:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        description=f"{PREMIUM} This feature is for Premium servers only.",
+                        color=COLOR,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            modal = VerificationDMModal(self, title="Set Verification Message")
+            self.last_interaction = interaction
+            await interaction.response.send_modal(modal)
+        except Exception as e:
+            print(f"Error in set_verification_dm: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    embed=discord.Embed(description=f"{CROSS} Error: {e}", color=COLOR),
+                    ephemeral=True,
+                )
+
+    @discord.ui.button(
+        label="Set Unsubscribe Notification",
+        emoji=FLAG,
+        style=discord.ButtonStyle.grey,
+        row=2,
+    )
+    async def set_unsubscribe_dm(
+        self, interaction: discord.Interaction, button: Button
+    ):
+        try:
+            has_premium = await is_guild_premium(interaction)
+            if not has_premium:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        description=f"{PREMIUM} This feature is for Premium servers only.",
+                        color=COLOR,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            modal = UnsubscribeDMModal(self, title="Set Unsubscribe Notification")
+            self.last_interaction = interaction
+            await interaction.response.send_modal(modal)
+        except Exception as e:
+            print(f"Error in set_unsubscribe_dm: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    embed=discord.Embed(description=f"{CROSS} Error: {e}", color=COLOR),
+                    ephemeral=True,
+                )
+
+    @discord.ui.button(
+        label="Set Tier Roles", emoji=ROLE, style=discord.ButtonStyle.grey, row=2
+    )
+    async def set_tier_roles(self, interaction: discord.Interaction, button: Button):
+        try:
+            has_premium = await is_guild_premium(interaction)
+            if not has_premium:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        description=f"{PREMIUM} This feature is for Premium servers only.",
+                        color=COLOR,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            if not self.server_id:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        description=f"{CROSS} Set the YouTube channel and subscriber role first.",
+                        color=COLOR,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            config = await get_server_config_by_id(self.server_id)
+            view = TierRolesView(
+                self, await get_tiers(self.server_id), config["stack_tiers"]
+            )
+            await interaction.response.edit_message(embed=view.get_embed(), view=view)
+        except Exception as e:
+            print(f"Error in set_tier_roles: {e}")
+
+    @discord.ui.button(label="Back", emoji=HOME, style=discord.ButtonStyle.grey, row=2)
+    async def back_button(self, interaction: discord.Interaction, button: Button):
+        try:
+            embed = discord.Embed(
+                title=f"{COG} Server Configuration",
+                description="Choose an action to manage your server's YouTube subscriber role settings",
+                color=COLOR,
+            )
+            view = SetupMainView(self.guild_id)
+            await interaction.response.edit_message(embed=embed, view=view)
+        except Exception as e:
+            print(f"Error in back_button: {e}")
+
 
 class TierRolesView(View):
     def __init__(self, parent: ConfigurationEditView, tiers, stack: bool):
@@ -587,7 +587,7 @@ class TierRolesView(View):
             role_status = (
                 f"<@&{self.tiers[days]}>" if days in self.tiers else f"{CROSS} Not set"
             )
-            lines.append(f"`{label}` {role_status}")
+            lines.append(f"> `{label}` - {role_status}")
         embed = discord.Embed(
             title=f"{ROLE} Tier Roles",
             description="Reward members for how long they have been subscribed. Select a duration, then select the role to give.\n\n"
