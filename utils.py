@@ -54,6 +54,7 @@ MAIL = "<:mail:1490844152827613354>"
 REPLY = "<:reply:1036792837821435976>"
 
 COLOR = 0xAF4875
+PREMIUM_PERKS = f"{EDIT} Configure up to 5 YouTube channels\n{MAIL} Set verification success messages\n{FLAG} Set unsubscribe notifications\n{YT} Priority and more frequent subscription checks"
 SKU_ID = int(os.environ.get("DISCORD_PREMIUM_SKU_ID", 0))
 
 

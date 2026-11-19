@@ -1,5 +1,7 @@
 import asyncio
 import datetime
+import hashlib
+import hmac
 import os
 
 import asyncpg
@@ -34,6 +36,12 @@ def decrypt_token(stored: str) -> str:
         return _get_fernet().decrypt(stored.encode()).decode()
     except InvalidToken:
         return stored
+
+
+def hash_account(account_id: str) -> str:
+    return hmac.new(
+        os.environ["TOKEN_ENCRYPTION_KEY"].encode(), account_id.encode(), hashlib.sha256
+    ).hexdigest()
 
 
 def _is_encrypted(stored: str) -> bool:
@@ -79,6 +87,15 @@ async def init_db():
             )
             await connection.execute(
                 "CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER NOT NULL, server_id INTEGER NOT NULL, yt_channel_id TEXT NOT NULL, is_subscribed BOOLEAN, last_checked TIMESTAMP, PRIMARY KEY (user_id, server_id), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE)"
+            )
+            await connection.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS yt_account_hash TEXT"
+            )
+            await connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS users_guild_account ON users (guild_id, yt_account_hash)"
+            )
+            await connection.execute(
+                "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP, ADD COLUMN IF NOT EXISTS changed_at TIMESTAMP"
             )
             await _encrypt_existing_tokens(connection)
         pool = new_pool
@@ -168,7 +185,7 @@ async def update_subscription_status(
     pool = await get_pool()
     async with pool.acquire() as connection:
         await connection.execute(
-            "INSERT INTO subscriptions (user_id, server_id, yt_channel_id, is_subscribed, last_checked) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (user_id, server_id) DO UPDATE SET is_subscribed = EXCLUDED.is_subscribed, last_checked = EXCLUDED.last_checked",
+            "INSERT INTO subscriptions (user_id, server_id, yt_channel_id, is_subscribed, last_checked, created_at, changed_at) VALUES ($1, $2, $3, $4, $5, $5, $5) ON CONFLICT (user_id, server_id) DO UPDATE SET changed_at = CASE WHEN subscriptions.is_subscribed IS DISTINCT FROM EXCLUDED.is_subscribed THEN EXCLUDED.last_checked ELSE subscriptions.changed_at END, is_subscribed = EXCLUDED.is_subscribed, last_checked = EXCLUDED.last_checked",
             user_id,
             server_id,
             yt_channel_id,
@@ -198,4 +215,54 @@ async def get_server_configs_for_guild(guild_id: int):
         return await connection.fetch(
             "SELECT id, guild_id, yt_channel_id, role_id, log_channel_id, verification_dm_content, unsubscribe_dm_content FROM servers WHERE guild_id = $1 ORDER BY id",
             guild_id,
+        )
+
+
+async def get_account_holder(guild_id: int, account_hash: str, user_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        return await connection.fetchrow(
+            "SELECT id, discord_id FROM users WHERE guild_id = $1 AND yt_account_hash = $2 AND id != $3",
+            guild_id,
+            account_hash,
+            user_id,
+        )
+
+
+async def set_account_hash(user_id: int, account_hash: str = None):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "UPDATE users SET yt_account_hash = $1 WHERE id = $2", account_hash, user_id
+        )
+
+
+async def claim_account_hash(user_id: int, guild_id: int, account_hash: str):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "UPDATE users SET yt_account_hash = $1 WHERE id = $2 AND yt_account_hash IS NULL AND NOT EXISTS (SELECT 1 FROM users WHERE guild_id = $3 AND yt_account_hash = $1)",
+            account_hash,
+            user_id,
+            guild_id,
+        )
+
+
+async def clear_user_refresh_token(user_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "UPDATE users SET refresh_token = NULL WHERE id = $1", user_id
+        )
+
+
+async def get_guild_stats(guild_id: int):
+    now = datetime.datetime.now()
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        return await connection.fetch(
+            "SELECT s.id, s.yt_channel_id, COUNT(sub.user_id) AS verified, COUNT(*) FILTER (WHERE sub.is_subscribed) AS subscribed, COUNT(*) FILTER (WHERE sub.created_at >= $2) AS new_week, COUNT(*) FILTER (WHERE sub.created_at >= $3) AS new_month, COUNT(*) FILTER (WHERE NOT sub.is_subscribed AND sub.changed_at >= $3) AS lost_month, MAX(sub.last_checked) AS last_checked FROM servers s LEFT JOIN subscriptions sub ON sub.server_id = s.id WHERE s.guild_id = $1 GROUP BY s.id ORDER BY s.id",
+            guild_id,
+            now - datetime.timedelta(days=7),
+            now - datetime.timedelta(days=30),
         )

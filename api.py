@@ -18,10 +18,14 @@ from slowapi.util import get_remote_address
 
 from bot import bot, log_action
 from database import (
+    clear_user_refresh_token,
     decrypt_token,
+    get_account_holder,
     get_pool,
     get_server_config_by_id,
     get_user_id,
+    hash_account,
+    set_account_hash,
     update_subscription_status,
     update_user_refresh_token,
 )
@@ -101,7 +105,7 @@ async def home_page(request: Request):
         <h3>For Server Admins</h3>
         <p>Run the <code>/setup</code> command (requires administrator permissions) to configure the bot for your server. You'll need to specify a YouTube channel and subscriber role.</p>
         <h3>Premium</h3>
-        <p>The bot is completely free-to-use for one YouTube channel every server. Premium allows you to add up to 5 YouTube channels every server, a custom message when a member verifies, and a custom message when a member unsubscribes. Run the <code>/premium</code> command in your server to upgrade.</p>
+        <p>The bot is completely free-to-use for one YouTube channel every server. Premium allows you to add up to 5 YouTube channels every server, a custom message when a member verifies, a custom message when a member unsubscribes, and priority subscription checks that run more often. Run the <code>/premium</code> command in your server to upgrade.</p>
         <h3>For Server Members</h3>
         <p>Run the <code>/verify</code> command to link your YouTube account and verify your subscription. You will get the subscriber role as long as you're subscribed to the configured channel.</p>
         <p><a href="https://github.com/iancheung0202/Subscriber-Role">GitHub</a> <a href="/privacy">Privacy Policy</a> <a href="/terms">Terms of Service</a></p>""",
@@ -137,6 +141,7 @@ async def privacy_policy(request: Request):
         <ul>
             <li><strong>YouTube Subscriptions List:</strong> We retrieve your complete list of YouTube channels you are subscribed to.</li>
             <li><strong>YouTube Subscription Status:</strong> We determine whether you are subscribed to a specific channel ID provided by the server administrator.</li>
+            <li><strong>YouTube Account Identifier:</strong> We store a one-way hash of your YouTube channel ID so that one YouTube account cannot be linked to multiple members of the same server.</li>
             <li><strong>OAuth2 Refresh Token:</strong> We securely store an offline access token to periodically re-check your subscription status without requiring re-authentication. </li>
         </ul>
         <p><strong>Important:</strong> We only access to view your subscription data. We do <strong>NOT</strong> access your email address, password, personal contact information, watch history, private videos or playlists, YouTube comments, interactions, or any other Google services or data not explicitly listed above.</p>
@@ -249,7 +254,7 @@ def check_subscriptions(credentials, channel_id: str):
         )
         response = request.execute()
         items = response.get("items", [])
-        return len(items) > 0
+        return items[0]["snippet"] if items else False
     except Exception as e:
         print(f"Error checking sub status: {e}")
         return False
@@ -374,8 +379,8 @@ async def callback(request: Request):
         client_id=os.environ["GOOGLE_CLIENT_ID"],
         client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     )
-    is_subscribed = await asyncio.to_thread(check_subscriptions, creds, yt_channel_id)
-    await update_subscription_status(user_id, server_id, yt_channel_id, is_subscribed)
+    snippet = await asyncio.to_thread(check_subscriptions, creds, yt_channel_id)
+    is_subscribed = bool(snippet)
     guild = bot.get_guild(guild_id)
     if not guild:
         return HTMLResponse(
@@ -383,6 +388,32 @@ async def callback(request: Request):
                 "Bot Error", "Internal bot error: Cannot find Discord server."
             )
         )
+    if is_subscribed and snippet.get("channelId"):
+        account_hash = hash_account(snippet["channelId"])
+        holder = await get_account_holder(guild_id, account_hash, user_id)
+        if holder:
+            try:
+                await guild.fetch_member(holder["discord_id"])
+                await clear_user_refresh_token(user_id)
+                try:
+                    await log_action(
+                        guild_id,
+                        f"{NEUTRAL} <@{discord_id}> attempted to verify for [{channel_name}](https://www.youtube.com/channel/{yt_channel_id}), but their YouTube account is already linked to <@{holder['discord_id']}>.",
+                        discord.Color.red(),
+                        server_id=server_id,
+                    )
+                except Exception:
+                    pass
+                return HTMLResponse(
+                    render_response(
+                        "Account Already Linked",
+                        "This YouTube account is already linked to another member of this server.",
+                    )
+                )
+            except discord.errors.NotFound:
+                await set_account_hash(holder["id"])
+        await set_account_hash(user_id, account_hash)
+    await update_subscription_status(user_id, server_id, yt_channel_id, is_subscribed)
     try:
         member = await guild.fetch_member(discord_id)
     except discord.errors.NotFound:

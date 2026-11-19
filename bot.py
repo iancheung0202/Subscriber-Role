@@ -15,13 +15,16 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from database import (
+    claim_account_hash,
     decrypt_token,
     delete_server_config,
     get_all_server_configs,
+    get_guild_stats,
     get_pool,
     get_server_config_by_id,
     get_server_configs_for_guild,
     get_user_id,
+    hash_account,
     set_server_config,
     update_subscription_status,
 )
@@ -41,6 +44,7 @@ from utils import (
     MAIL,
     NEUTRAL,
     PREMIUM,
+    PREMIUM_PERKS,
     RED_BIN,
     REPLY,
     ROLE,
@@ -134,7 +138,7 @@ async def on_app_command_completion(
     where = describe_guild(interaction.guild) if interaction.guild else "a DM"
     await owner_log(
         "COMMAND_LOG_CHANNEL_ID",
-        f"{ADD} `/{command.qualified_name}` by <@{interaction.user.id}> (`{interaction.user.id}`) in {where}.",
+        f"{ADD} `/{command.qualified_name}` by <@{interaction.user.id}> in {where}.",
     )
 
 
@@ -838,6 +842,32 @@ class SetupMainView(View):
         except Exception as e:
             print(f"Error in on_config_selected_for_delete: {e}")
 
+    @discord.ui.button(label="Statistics", emoji=INFO, style=discord.ButtonStyle.grey)
+    async def statistics(self, interaction: discord.Interaction, button: Button):
+        rows = await get_guild_stats(self.guild_id)
+        if not rows:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description=f"{CROSS} No configurations found.", color=COLOR
+                ),
+                ephemeral=True,
+            )
+            return
+        embed = discord.Embed(title=f"{INFO} Statistics", color=COLOR)
+        for row in rows:
+            channel_name = await get_youtube_channel_name(row["yt_channel_id"])
+            last_checked = (
+                f"<t:{int(row['last_checked'].timestamp())}:R>"
+                if row["last_checked"]
+                else "Never"
+            )
+            embed.add_field(
+                name=f"{channel_name} {YT}",
+                value=f"{CHECK} `{row['verified']:,}` verified, `{row['subscribed']:,}` subscribed now\n{ADD} `{row['new_week']:,}` new in 7 days, `{row['new_month']:,}` in 30 days\n{NEUTRAL} `{row['lost_month']:,}` unsubscribed in 30 days\n{FLAG} Last checked {last_checked}",
+                inline=False,
+            )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 @bot.tree.command(
     name="setup", description="Configure the bot for your server. (Admin only)"
@@ -873,14 +903,14 @@ async def premium(interaction: discord.Interaction):
     if has_premium:
         embed = discord.Embed(
             title=f"{PREMIUM} Subscriber Role Premium",
-            description=f"Thank you for supporting Subscriber Role! Your server already has premium unlocked and can enjoy:\n\n{EDIT} Configure up to 5 YouTube channels\n{MAIL} Set verification success messages\n{FLAG} Set unsubscribe notifications",
+            description=f"Thank you for supporting Subscriber Role! Your server already has premium unlocked and can enjoy:\n\n{PREMIUM_PERKS}",
             color=COLOR,
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
     else:
         embed = discord.Embed(
             title=f"{PREMIUM} Subscriber Role Premium",
-            description=f"Premium unlocks advanced features to supercharge your YouTube community!\n\n{EDIT} Configure up to 5 YouTube channels\n{MAIL} Set verification success messages\n{FLAG} Set unsubscribe notifications",
+            description=f"Premium unlocks advanced features to supercharge your YouTube community!\n\n{PREMIUM_PERKS}",
             color=COLOR,
         )
         await interaction.response.send_message(
@@ -1086,7 +1116,7 @@ async def on_entitlement_create(entitlement: discord.Entitlement):
                 configs = await get_server_configs_for_guild(guild_id)
                 embed = discord.Embed(
                     title=f"{PREMIUM} Premium Activated",
-                    description=f"Thank you for upgrading to premium in {guild.name}! You can now:\n\n{EDIT} Configure up to 5 YouTube channels\n{MAIL} Set verification success messages\n{FLAG} Set unsubscribe notifications",
+                    description=f"Thank you for upgrading to premium in {guild.name}! You can now:\n\n{PREMIUM_PERKS}",
                     color=discord.Color.pink(),
                 )
                 if configs and configs[0].get("log_channel_id"):
@@ -1194,6 +1224,7 @@ async def log_action(guild_id: int, message: str, color=COLOR, server_id: int = 
 SYNC_DAILY_LIMIT = int(os.environ.get("SYNC_DAILY_LIMIT") or 9000)
 SYNC_BATCH_SIZE = 5
 SYNC_RECHECK_HOURS = 20
+PREMIUM_RECHECK_HOURS = 10
 QUOTA_REASONS = ("quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded")
 
 
@@ -1216,7 +1247,7 @@ def check_subscription(refresh_token: str, yt_channel_id: str, discord_id: int):
         )
         res = req.execute()
         items = res.get("items", [])
-        return len(items) > 0
+        return items[0]["snippet"] if items else False
     except RefreshError as e:
         if "invalid_grant" in str(e):
             return False
@@ -1246,12 +1277,15 @@ async def sync_member(row, target: dict, stats: dict):
     refresh_token = decrypt_token(row["refresh_token"])
     if not refresh_token:
         return
-    is_subscribed = await asyncio.to_thread(
+    snippet = await asyncio.to_thread(
         check_subscription, refresh_token, yt_channel_id, discord_id
     )
-    if is_subscribed is None:
+    if snippet is None:
         stats["failed"] += 1
         return
+    is_subscribed = bool(snippet)
+    if is_subscribed and not row["yt_account_hash"] and snippet.get("channelId"):
+        await claim_account_hash(user_id, guild_id, hash_account(snippet["channelId"]))
     try:
         member = await guild.fetch_member(discord_id)
     except discord.errors.NotFound:
@@ -1320,6 +1354,20 @@ async def sync_member(row, target: dict, stats: dict):
     stats["checked"] += 1
 
 
+async def get_premium_guild_ids() -> set:
+    if not SKU_ID:
+        return set()
+    try:
+        return {
+            entitlement.guild_id
+            async for entitlement in bot.entitlements(limit=None, exclude_ended=True)
+            if entitlement.sku_id == SKU_ID and entitlement.guild_id
+        }
+    except Exception as e:
+        print(f"Error fetching premium guilds: {e}")
+        return set()
+
+
 async def run_sync() -> dict:
     stats = {
         "checked": 0,
@@ -1342,16 +1390,30 @@ async def run_sync() -> dict:
             )
             continue
         targets[config["id"]] = {"config": config, "guild": guild, "role": role}
+    premium_guilds = await get_premium_guild_ids()
+    now = datetime.datetime.now()
     pool = await get_pool()
     async with pool.acquire() as connection:
         rows = await connection.fetch(
-            "SELECT s.id AS server_id, u.id AS user_id, u.discord_id, u.refresh_token FROM servers s JOIN users u ON u.guild_id = s.guild_id LEFT JOIN subscriptions sub ON sub.user_id = u.id AND sub.server_id = s.id WHERE u.refresh_token IS NOT NULL AND (sub.last_checked IS NULL OR sub.last_checked < $1) ORDER BY sub.last_checked ASC NULLS FIRST, u.id",
-            datetime.datetime.now() - datetime.timedelta(hours=SYNC_RECHECK_HOURS),
+            "SELECT s.id AS server_id, s.guild_id, u.id AS user_id, u.discord_id, u.refresh_token, u.yt_account_hash, sub.last_checked FROM servers s JOIN users u ON u.guild_id = s.guild_id LEFT JOIN subscriptions sub ON sub.user_id = u.id AND sub.server_id = s.id WHERE u.refresh_token IS NOT NULL AND (sub.last_checked IS NULL OR sub.last_checked < $1) ORDER BY sub.last_checked ASC NULLS FIRST, u.id",
+            now - datetime.timedelta(hours=PREMIUM_RECHECK_HOURS),
         )
-    rows = [row for row in rows if row["server_id"] in targets]
+    stale = now - datetime.timedelta(hours=SYNC_RECHECK_HOURS)
+    rows = [
+        row
+        for row in rows
+        if row["server_id"] in targets
+        and (
+            row["guild_id"] in premium_guilds
+            or not row["last_checked"]
+            or row["last_checked"] < stale
+        )
+    ]
+    rows.sort(key=lambda row: row["guild_id"] not in premium_guilds)
     stats["remaining"] = len(rows)
-    for start in range(0, min(len(rows), SYNC_DAILY_LIMIT), SYNC_BATCH_SIZE):
-        batch = rows[start : min(start + SYNC_BATCH_SIZE, SYNC_DAILY_LIMIT)]
+    limit = SYNC_DAILY_LIMIT // 2
+    for start in range(0, min(len(rows), limit), SYNC_BATCH_SIZE):
+        batch = rows[start : min(start + SYNC_BATCH_SIZE, limit)]
         for row in batch:
             target = targets[row["server_id"]]
             if "channel_name" not in target:
@@ -1377,7 +1439,7 @@ async def run_sync() -> dict:
     return stats
 
 
-@tasks.loop(hours=24)
+@tasks.loop(hours=12)
 async def sync_roles():
     print("Running background sync task...")
     try:
@@ -1386,7 +1448,7 @@ async def sync_roles():
         traceback.print_exc()
         await owner_log(
             "SYNC_LOG_CHANNEL_ID",
-            f"{CROSS} Daily sync failed: {e}",
+            f"{CROSS} Sync failed: {e}",
             discord.Color.red(),
         )
         return
@@ -1394,11 +1456,9 @@ async def sync_roles():
     if stats["quota_hit"]:
         await owner_log(
             "SYNC_LOG_CHANNEL_ID",
-            f"{WARN} Daily sync stopped because the YouTube quota ran out. {summary}",
+            f"{WARN} Sync stopped because the YouTube quota ran out. {summary}",
             discord.Color.orange(),
         )
     else:
-        await owner_log(
-            "SYNC_LOG_CHANNEL_ID", f"{CHECK} Daily sync completed. {summary}"
-        )
+        await owner_log("SYNC_LOG_CHANNEL_ID", f"{CHECK} Sync completed. {summary}")
     print(f"Background sync task completed. {summary}")
