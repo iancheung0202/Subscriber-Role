@@ -8,10 +8,12 @@ import urllib.parse
 import discord
 from discord.ext import commands, tasks
 from discord.ui import Button, ChannelSelect, Modal, RoleSelect, Select, TextInput, View
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from database import (
+    decrypt_token,
     delete_server_config,
     get_all_server_configs,
     get_pool,
@@ -80,6 +82,59 @@ class Bot(commands.Bot):
 
 
 bot = Bot(command_prefix="!", intents=intents)
+
+
+async def owner_log(env_var: str, message: str, color=COLOR):
+    """Sends an embed to one of the bot owner's log channels. Does nothing if the env var is unset."""
+    channel_id = os.environ.get(env_var)
+    if not channel_id:
+        return
+    try:
+        channel = bot.get_channel(int(channel_id)) or await bot.fetch_channel(
+            int(channel_id)
+        )
+        await channel.send(embed=discord.Embed(description=message, color=color))
+    except Exception as e:
+        print(f"Error sending owner log to {env_var}: {e}")
+
+
+def describe_guild(guild: discord.Guild) -> str:
+    return f"**{discord.utils.escape_markdown(guild.name)}** (`{guild.id}`, {guild.member_count or 0} members)"
+
+
+async def describe_entitlement(entitlement: discord.Entitlement) -> str:
+    guild = bot.get_guild(entitlement.guild_id) if entitlement.guild_id else None
+    where = describe_guild(guild) if guild else f"guild `{entitlement.guild_id}`"
+    return f"{where} by <@{entitlement.user_id}> (`{entitlement.user_id}`)"
+
+
+@bot.event
+async def on_guild_join(guild: discord.Guild):
+    await owner_log(
+        "GUILD_LOG_CHANNEL_ID",
+        f"{CHECK} Joined {describe_guild(guild)}. Now in {len(bot.guilds)} servers.",
+        discord.Color.green(),
+    )
+
+
+@bot.event
+async def on_guild_remove(guild: discord.Guild):
+    await owner_log(
+        "GUILD_LOG_CHANNEL_ID",
+        f"{CROSS} Left {describe_guild(guild)}. Now in {len(bot.guilds)} servers.",
+        discord.Color.red(),
+    )
+
+
+@bot.event
+async def on_app_command_completion(
+    interaction: discord.Interaction, command: discord.app_commands.Command
+):
+    where = describe_guild(interaction.guild) if interaction.guild else "a DM"
+    await owner_log(
+        "COMMAND_LOG_CHANNEL_ID",
+        f"{ADD} `/{command.qualified_name}` by <@{interaction.user.id}> (`{interaction.user.id}`) in {where}.",
+    )
 
 
 class YouTubeChannelModal(Modal, title="Configure YouTube Channel"):
@@ -913,7 +968,7 @@ class VerifyChannelSelectView(View):
         channel_name = await get_youtube_channel_name(yt_channel_id)
         embed = discord.Embed(
             title=f"YouTube Account Verification {HELP}",
-            description=f"1. Make sure you are **subscribed** to [{channel_name}]({yt_channel_url}) first!\n2. Click **[HERE]({url})** to link your YouTube account and get your subscriber role.\n3. *You will be redirected to Google to authorize access.* Follow the video tutorial above if needed.",
+            description=f"1. Make sure you are **subscribed** to [{channel_name}]({yt_channel_url}) first!\n2. Click **[HERE]({url})** to link your YouTube account and get your subscriber role.\n3. *You will be redirected to Google to authorize access.*",
             color=COLOR,
         )
         embeds = [embed]
@@ -1046,10 +1101,29 @@ async def on_entitlement_create(entitlement: discord.Entitlement):
                     )
             except Exception as e:
                 print(f"Error sending premium thank you message: {e}")
+        await owner_log(
+            "PREMIUM_LOG_CHANNEL_ID",
+            f"{PREMIUM} Premium added for {await describe_entitlement(entitlement)}.",
+            discord.Color.pink(),
+        )
         print(f"Premium entitlement created for guild {guild_id}")
     except Exception as e:
         print(f"Error in on_entitlement_create: {e}")
         traceback.print_exc()
+
+
+@bot.event
+async def on_entitlement_update(entitlement: discord.Entitlement):
+    if not entitlement.guild_id:
+        return
+    if entitlement.ends_at:
+        status = f"renewed or cancelled, current period ends {discord.utils.format_dt(entitlement.ends_at, 'R')}"
+    else:
+        status = "updated"
+    await owner_log(
+        "PREMIUM_LOG_CHANNEL_ID",
+        f"{PREMIUM} Premium {status} for {await describe_entitlement(entitlement)}.",
+    )
 
 
 @bot.event
@@ -1096,6 +1170,11 @@ async def on_entitlement_delete(entitlement: discord.Entitlement):
             except Exception as e:
                 print(f"Error sending premium expiration message: {e}")
 
+        await owner_log(
+            "PREMIUM_LOG_CHANNEL_ID",
+            f"{WARN} Premium removed for {await describe_entitlement(entitlement)}.",
+            discord.Color.light_gray(),
+        )
         print(f"Premium entitlement deleted for guild {guild_id}")
     except Exception as e:
         print(f"Error in on_entitlement_delete: {e}")
@@ -1142,7 +1221,7 @@ async def sync_roles():
                 async with semaphore:
                     user_id = row["id"]
                     discord_id = row["discord_id"]
-                    refresh_token = row["refresh_token"]
+                    refresh_token = decrypt_token(row["refresh_token"])
                     if not refresh_token:
                         return
                     creds = Credentials(
@@ -1162,11 +1241,20 @@ async def sync_roles():
                             res = req.execute()
                             items = res.get("items", [])
                             return len(items) > 0
+                        except RefreshError as e:
+                            # The member revoked access, so it can no longer be verified.
+                            if "invalid_grant" in str(e):
+                                return False
+                            print(f"Could not refresh token for {discord_id}: {e}")
+                            return None
                         except Exception as e:
                             print(f"Error for {discord_id}: {e}")
-                            return False
+                            return None
 
                     is_subscribed = await asyncio.to_thread(check_sub)
+                    # The check failed (quota, outage, network): leave the role as it is.
+                    if is_subscribed is None:
+                        return
                     try:
                         member = await guild.fetch_member(discord_id)
                     except discord.errors.NotFound:

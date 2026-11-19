@@ -18,6 +18,7 @@ from slowapi.util import get_remote_address
 
 from bot import bot, log_action
 from database import (
+    decrypt_token,
     get_pool,
     get_server_config_by_id,
     get_user_id,
@@ -101,6 +102,8 @@ async def home_page(request: Request):
         <p>Run the <code>/setup</code> command (requires administrator permissions) to configure the bot for your server. You'll need to specify a YouTube channel and subscriber role.</p>
         <h3>For Members</h3>
         <p>Run the <code>/verify</code> command to link your YouTube account and verify your subscription. You will get the subscriber role as long as you're subscribed to the configured channel.</p>
+        <h3>Premium</h3>
+        <p>The bot is free for one YouTube channel per server. Premium adds up to 5 YouTube channels, a custom message when a member verifies, and a custom message when a member loses the role. Run the <code>/premium</code> command in your server to upgrade.</p>
         <p><a href="https://github.com/iancheung0202/Subscriber-Role">GitHub</a> <a href="/privacy">Privacy Policy</a> <a href="/terms">Terms of Service</a></p>""",
     )
 
@@ -354,7 +357,7 @@ async def callback(request: Request):
                 "SELECT refresh_token FROM users WHERE id = $1", user_id
             )
             if row and row["refresh_token"]:
-                refresh_token = row["refresh_token"]
+                refresh_token = decrypt_token(row["refresh_token"])
             else:
                 return HTMLResponse(
                     render_response(

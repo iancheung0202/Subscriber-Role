@@ -3,9 +3,63 @@ import datetime
 import os
 
 import asyncpg
+from cryptography.fernet import Fernet, InvalidToken
 
 pool = None
 _init_lock = None
+_fernet = None
+
+
+def _get_fernet() -> Fernet:
+    global _fernet
+    if _fernet is None:
+        key = os.environ.get("TOKEN_ENCRYPTION_KEY")
+        if not key:
+            raise RuntimeError(
+                "TOKEN_ENCRYPTION_KEY is not set. Generate one with: "
+                'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+            )
+        _fernet = Fernet(key.encode())
+    return _fernet
+
+
+def encrypt_token(token: str) -> str:
+    return _get_fernet().encrypt(token.encode()).decode()
+
+
+def decrypt_token(stored: str) -> str:
+    """Returns the refresh token. Rows written before encryption was added are returned as is."""
+    if not stored:
+        return stored
+    try:
+        return _get_fernet().decrypt(stored.encode()).decode()
+    except InvalidToken:
+        return stored
+
+
+def _is_encrypted(stored: str) -> bool:
+    try:
+        _get_fernet().decrypt(stored.encode())
+        return True
+    except InvalidToken:
+        return False
+
+
+async def _encrypt_existing_tokens(connection):
+    rows = await connection.fetch(
+        "SELECT id, refresh_token FROM users WHERE refresh_token IS NOT NULL"
+    )
+    migrated = 0
+    for row in rows:
+        if not _is_encrypted(row["refresh_token"]):
+            await connection.execute(
+                "UPDATE users SET refresh_token = $1 WHERE id = $2",
+                encrypt_token(row["refresh_token"]),
+                row["id"],
+            )
+            migrated += 1
+    if migrated:
+        print(f"Encrypted {migrated} stored refresh tokens")
 
 
 async def init_db():
@@ -15,8 +69,9 @@ async def init_db():
     async with _init_lock:
         if pool is not None:
             return
-        pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
-        async with pool.acquire() as connection:
+        _get_fernet()
+        new_pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+        async with new_pool.acquire() as connection:
             await connection.execute(
                 "CREATE TABLE IF NOT EXISTS servers (id SERIAL PRIMARY KEY, guild_id BIGINT NOT NULL, yt_channel_id TEXT NOT NULL, role_id BIGINT NOT NULL, log_channel_id BIGINT, verification_dm_content TEXT, unsubscribe_dm_content TEXT)"
             )
@@ -26,6 +81,8 @@ async def init_db():
             await connection.execute(
                 "CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER NOT NULL, server_id INTEGER NOT NULL, yt_channel_id TEXT NOT NULL, is_subscribed BOOLEAN, last_checked TIMESTAMP, PRIMARY KEY (user_id, server_id), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE)"
             )
+            await _encrypt_existing_tokens(connection)
+        pool = new_pool
 
 
 async def get_pool():
@@ -100,7 +157,9 @@ async def update_user_refresh_token(user_id: int, refresh_token: str):
     pool = await get_pool()
     async with pool.acquire() as connection:
         await connection.execute(
-            "UPDATE users SET refresh_token = $1 WHERE id = $2", refresh_token, user_id
+            "UPDATE users SET refresh_token = $1 WHERE id = $2",
+            encrypt_token(refresh_token),
+            user_id,
         )
 
 
