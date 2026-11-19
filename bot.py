@@ -23,9 +23,12 @@ from database import (
     get_pool,
     get_server_config_by_id,
     get_server_configs_for_guild,
+    get_tiers,
     get_user_id,
     hash_account,
     set_server_config,
+    set_stack_tiers,
+    set_tier,
     update_subscription_status,
 )
 from utils import (
@@ -49,6 +52,7 @@ from utils import (
     REPLY,
     ROLE,
     SKU_ID,
+    TIER_DURATIONS,
     WARN,
     YT,
     get_youtube_channel_name,
@@ -341,6 +345,16 @@ class ConfigurationEditView(View):
             value=unsubscribe_status,
             inline=False,
         )
+        tiers = await get_tiers(self.server_id) if self.server_id else []
+        embed.add_field(
+            name=f"Tier Roles {ROLE} {PREMIUM}",
+            value=(
+                " ".join(f"<@&{tier['role_id']}>" for tier in tiers)
+                if tiers
+                else f"{CROSS} Disabled"
+            ),
+            inline=False,
+        )
         return embed
 
     async def update_config_display(self):
@@ -440,6 +454,38 @@ class ConfigurationEditView(View):
                     ephemeral=True,
                 )
 
+    @discord.ui.button(
+        label="Set Tier Roles", emoji=ROLE, style=discord.ButtonStyle.grey, row=1
+    )
+    async def set_tier_roles(self, interaction: discord.Interaction, button: Button):
+        try:
+            has_premium = await is_guild_premium(interaction)
+            if not has_premium:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        description=f"{PREMIUM} This feature is for Premium servers only.",
+                        color=COLOR,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            if not self.server_id:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        description=f"{CROSS} Set the YouTube channel and subscriber role first.",
+                        color=COLOR,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            config = await get_server_config_by_id(self.server_id)
+            view = TierRolesView(
+                self, await get_tiers(self.server_id), config["stack_tiers"]
+            )
+            await interaction.response.edit_message(embed=view.get_embed(), view=view)
+        except Exception as e:
+            print(f"Error in set_tier_roles: {e}")
+
     @discord.ui.select(cls=RoleSelect, placeholder="Select subscriber role")
     async def select_role(self, interaction: discord.Interaction, select: Select):
         try:
@@ -521,6 +567,99 @@ class ConfigurationEditView(View):
             await self.update_config_display()
         except Exception as e:
             print(f"Error in select_channel: {e}")
+
+
+class TierRolesView(View):
+    def __init__(self, parent: ConfigurationEditView, tiers, stack: bool):
+        super().__init__()
+        self.parent = parent
+        self.tiers = {tier["days"]: tier["role_id"] for tier in tiers}
+        self.stack = stack
+        self.days = None
+        self.select_duration.options = [
+            discord.SelectOption(label=label, value=str(days))
+            for days, label in TIER_DURATIONS.items()
+        ]
+
+    def get_embed(self) -> discord.Embed:
+        lines = [f"`Just now` <@&{self.parent.role_id}>"]
+        for days, label in TIER_DURATIONS.items():
+            role_status = (
+                f"<@&{self.tiers[days]}>" if days in self.tiers else f"{CROSS} Not set"
+            )
+            lines.append(f"`{label}` {role_status}")
+        embed = discord.Embed(
+            title=f"{ROLE} Tier Roles",
+            description="Reward members for how long they have been subscribed. Select a duration, then select the role to give.\n\n"
+            + "\n".join(lines),
+            color=COLOR,
+        )
+        embed.add_field(
+            name=f"Stack Roles {EDIT}",
+            value=(
+                f"{CHECK} Members keep every tier role they have reached"
+                if self.stack
+                else f"{CROSS} Members only keep their highest tier role"
+            ),
+            inline=False,
+        )
+        return embed
+
+    @discord.ui.select(placeholder="Select a duration", row=0)
+    async def select_duration(self, interaction: discord.Interaction, select: Select):
+        self.days = int(select.values[0])
+        for option in select.options:
+            option.default = option.value == select.values[0]
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.select(
+        cls=RoleSelect, placeholder="Select a role for that duration", row=1
+    )
+    async def select_role(self, interaction: discord.Interaction, select: Select):
+        try:
+            role = select.values[0]
+            if self.days is None:
+                message = "Select a duration first."
+            elif role.is_default() or role.managed:
+                message = "This role cannot be assigned to members."
+            elif role.position >= interaction.guild.me.top_role.position:
+                message = "The bot cannot manage this role. Please move the bot's role above this role first."
+            else:
+                await set_tier(self.parent.server_id, self.days, role.id)
+                self.tiers[self.days] = role.id
+                await interaction.response.edit_message(
+                    embed=self.get_embed(), view=self
+                )
+                return
+            await interaction.response.send_message(
+                embed=discord.Embed(description=f"{CROSS} {message}", color=COLOR),
+                ephemeral=True,
+            )
+        except Exception as e:
+            print(f"Error in select_role: {e}")
+
+    @discord.ui.button(
+        label="Remove Tier", emoji=BIN, style=discord.ButtonStyle.grey, row=2
+    )
+    async def remove_tier(self, interaction: discord.Interaction, button: Button):
+        if self.days in self.tiers:
+            await set_tier(self.parent.server_id, self.days)
+            del self.tiers[self.days]
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(
+        label="Stack Roles", emoji=EDIT, style=discord.ButtonStyle.grey, row=2
+    )
+    async def toggle_stack(self, interaction: discord.Interaction, button: Button):
+        self.stack = not self.stack
+        await set_stack_tiers(self.parent.server_id, self.stack)
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="Back", emoji=HOME, style=discord.ButtonStyle.grey, row=2)
+    async def back_button(self, interaction: discord.Interaction, button: Button):
+        self.parent.last_interaction = interaction
+        embed = await self.parent.get_status_embed()
+        await interaction.response.edit_message(embed=embed, view=self.parent)
 
 
 class ConfigSelectView(View):
@@ -1263,6 +1402,37 @@ def check_subscription(refresh_token: str, yt_channel_id: str, discord_id: int):
         return None
 
 
+async def sync_tier_roles(member, guild, config, tiers, channel_name, snippet):
+    roles = [
+        (tier["days"], guild.get_role(tier["role_id"]))
+        for tier in tiers
+        if guild.get_role(tier["role_id"])
+    ]
+    earned = []
+    if snippet and snippet.get("publishedAt"):
+        since = datetime.datetime.fromisoformat(
+            snippet["publishedAt"].replace("Z", "+00:00")
+        )
+        age = (datetime.datetime.now(datetime.timezone.utc) - since).days
+        earned = [role for days, role in roles if age >= days]
+    wanted = earned if config["stack_tiers"] else earned[-1:]
+    added = [role for role in wanted if role not in member.roles]
+    removed = [role for _, role in roles if role in member.roles and role not in wanted]
+    try:
+        if added:
+            await member.add_roles(*added)
+            await log_action(
+                config["guild_id"],
+                f"{CHECK} Added {' '.join(role.mention for role in added)} to <@{member.id}> for how long they have been subscribed to [{channel_name}](https://www.youtube.com/channel/{config['yt_channel_id']}).",
+                discord.Color.green(),
+                server_id=config["id"],
+            )
+        if removed:
+            await member.remove_roles(*removed)
+    except Exception as e:
+        print(f"Error syncing tier roles for {member.id}: {e}")
+
+
 async def sync_member(row, target: dict, stats: dict):
     config = target["config"]
     guild = target["guild"]
@@ -1350,6 +1520,10 @@ async def sync_member(row, target: dict, stats: dict):
                     )
                 except Exception:
                     pass
+        if target["tiers"]:
+            await sync_tier_roles(
+                member, guild, config, target["tiers"], channel_name, snippet
+            )
     await update_subscription_status(user_id, server_id, yt_channel_id, is_subscribed)
     stats["checked"] += 1
 
@@ -1391,6 +1565,14 @@ async def run_sync() -> dict:
             continue
         targets[config["id"]] = {"config": config, "guild": guild, "role": role}
     premium_guilds = await get_premium_guild_ids()
+    tiers = await get_tiers()
+    for server_id, target in targets.items():
+        target["tiers"] = [
+            tier
+            for tier in tiers
+            if tier["server_id"] == server_id
+            and target["config"]["guild_id"] in premium_guilds
+        ]
     now = datetime.datetime.now()
     pool = await get_pool()
     async with pool.acquire() as connection:

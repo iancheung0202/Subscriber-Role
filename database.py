@@ -97,6 +97,12 @@ async def init_db():
             await connection.execute(
                 "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP, ADD COLUMN IF NOT EXISTS changed_at TIMESTAMP"
             )
+            await connection.execute(
+                "ALTER TABLE servers ADD COLUMN IF NOT EXISTS stack_tiers BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+            await connection.execute(
+                "CREATE TABLE IF NOT EXISTS tiers (server_id INTEGER NOT NULL, days INTEGER NOT NULL, role_id BIGINT NOT NULL, PRIMARY KEY (server_id, days), FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE)"
+            )
             await _encrypt_existing_tokens(connection)
         pool = new_pool
 
@@ -148,7 +154,7 @@ async def get_all_server_configs():
     pool = await get_pool()
     async with pool.acquire() as connection:
         return await connection.fetch(
-            "SELECT id, guild_id, yt_channel_id, role_id, log_channel_id, verification_dm_content, unsubscribe_dm_content FROM servers ORDER BY guild_id, id"
+            "SELECT id, guild_id, yt_channel_id, role_id, log_channel_id, verification_dm_content, unsubscribe_dm_content, stack_tiers FROM servers ORDER BY guild_id, id"
         )
 
 
@@ -198,7 +204,7 @@ async def get_server_config_by_id(server_id: int):
     pool = await get_pool()
     async with pool.acquire() as connection:
         return await connection.fetchrow(
-            "SELECT id, guild_id, yt_channel_id, role_id, log_channel_id, verification_dm_content, unsubscribe_dm_content FROM servers WHERE id = $1",
+            "SELECT id, guild_id, yt_channel_id, role_id, log_channel_id, verification_dm_content, unsubscribe_dm_content, stack_tiers FROM servers WHERE id = $1",
             server_id,
         )
 
@@ -213,7 +219,7 @@ async def get_server_configs_for_guild(guild_id: int):
     pool = await get_pool()
     async with pool.acquire() as connection:
         return await connection.fetch(
-            "SELECT id, guild_id, yt_channel_id, role_id, log_channel_id, verification_dm_content, unsubscribe_dm_content FROM servers WHERE guild_id = $1 ORDER BY id",
+            "SELECT id, guild_id, yt_channel_id, role_id, log_channel_id, verification_dm_content, unsubscribe_dm_content, stack_tiers FROM servers WHERE guild_id = $1 ORDER BY id",
             guild_id,
         )
 
@@ -265,4 +271,41 @@ async def get_guild_stats(guild_id: int):
             guild_id,
             now - datetime.timedelta(days=7),
             now - datetime.timedelta(days=30),
+        )
+
+
+async def get_tiers(server_id: int = None):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        if server_id:
+            return await connection.fetch(
+                "SELECT server_id, days, role_id FROM tiers WHERE server_id = $1 ORDER BY days",
+                server_id,
+            )
+        return await connection.fetch(
+            "SELECT server_id, days, role_id FROM tiers ORDER BY days"
+        )
+
+
+async def set_tier(server_id: int, days: int, role_id: int = None):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        if role_id:
+            await connection.execute(
+                "INSERT INTO tiers (server_id, days, role_id) VALUES ($1, $2, $3) ON CONFLICT (server_id, days) DO UPDATE SET role_id = EXCLUDED.role_id",
+                server_id,
+                days,
+                role_id,
+            )
+        else:
+            await connection.execute(
+                "DELETE FROM tiers WHERE server_id = $1 AND days = $2", server_id, days
+            )
+
+
+async def set_stack_tiers(server_id: int, stack_tiers: bool):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "UPDATE servers SET stack_tiers = $1 WHERE id = $2", stack_tiers, server_id
         )
