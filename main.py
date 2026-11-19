@@ -23,7 +23,12 @@ async def main():
     api_task = asyncio.create_task(server.serve())
     bot_task = asyncio.create_task(bot.start(token))
 
-    await asyncio.gather(api_task, bot_task)
+    await asyncio.wait({api_task, bot_task}, return_when=asyncio.FIRST_COMPLETED)
+    server.should_exit = True
+    await bot.close()
+    for result in await asyncio.gather(api_task, bot_task, return_exceptions=True):
+        if isinstance(result, Exception):
+            raise result
 
 
 if __name__ == "__main__":
