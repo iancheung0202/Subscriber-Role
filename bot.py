@@ -16,6 +16,7 @@ from googleapiclient.errors import HttpError
 
 from database import (
     claim_account_hash,
+    clear_stale_refresh_tokens,
     clear_user_refresh_token,
     decrypt_token,
     delete_server_config,
@@ -1624,6 +1625,8 @@ async def run_sync() -> dict:
             print("YouTube quota exhausted, stopping sync until the next run.")
             break
         await asyncio.sleep(1)
+    if not stats["quota_hit"] and not stats["remaining"]:
+        await clear_stale_refresh_tokens(now - datetime.timedelta(days=30))
     return stats
 
 

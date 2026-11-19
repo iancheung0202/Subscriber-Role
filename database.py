@@ -254,6 +254,15 @@ async def claim_account_hash(user_id: int, guild_id: int, account_hash: str):
         )
 
 
+async def clear_stale_refresh_tokens(before: datetime.datetime):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "UPDATE users SET refresh_token = NULL WHERE refresh_token IS NOT NULL AND (SELECT MAX(last_checked) FROM subscriptions WHERE user_id = users.id) < $1",
+            before,
+        )
+
+
 async def clear_user_refresh_token(user_id: int):
     pool = await get_pool()
     async with pool.acquire() as connection:

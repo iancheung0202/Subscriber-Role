@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import hashlib
 import hmac
+import html
 import os
 
 import aiohttp
@@ -63,7 +64,13 @@ def generate_page(
     footer_html = (
         "<footer><p>Developed by Ian Cheung • All rights reserved.</p></footer>"
     )
-    full_body = f"{body_html}\n        {footer_html}"
+    notice = os.environ.get("SITE_NOTICE")
+    notice_html = (
+        f'<p style="border: 2px solid #d8c3cd; border-radius: 8px; padding: 8px 12px; color: #af4875;">{html.escape(notice)}</p>'
+        if notice
+        else ""
+    )
+    full_body = f"{notice_html}\n        {body_html}\n        {footer_html}"
     return f'<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0"> <meta name="description" content="{description}"> <meta name="theme-color" content="#af4875"> <meta property="og:title" content="{title}"> <meta property="og:description" content="{description}"> <meta property="og:image" content="{BOT_AVATAR}?size=256"> <meta property="og:url" content="{url}"> <meta property="og:type" content="website"> <meta name="twitter:card" content="summary_large_image"> <meta name="twitter:title" content="{title}"> <meta name="twitter:description" content="{description}"> <meta name="twitter:image" content="{BOT_AVATAR}?size=256"> <title>{title}</title> <link rel="icon" href="{BOT_AVATAR}?size=32" type="image/png"> <style>{styles}</style> </head> <body> {full_body} </body> </html>'
 
 
@@ -109,6 +116,8 @@ async def home_page(request: Request):
         <p>The bot is completely free-to-use for one YouTube channel every server. Premium allows you to add up to 5 YouTube channels every server, a custom message when a member verifies, a custom message when a member unsubscribes, priority subscription checks that run more often, and tier roles for long-time subscribers. Run the <code>/premium</code> command in your server to upgrade.</p>
         <h3>For Server Members</h3>
         <p>Run the <code>/verify</code> command to link your YouTube account and verify your subscription. You will get the subscriber role as long as you're subscribed to the configured channel.</p>
+        <p>Subscriber Role uses YouTube API Services. By using it, you agree to the following:</p>
+        <p><a href="https://www.youtube.com/t/terms" target="_blank">YouTube Terms of Service</a> <a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a></p>
         <p><a href="https://github.com/iancheung0202/Subscriber-Role">GitHub</a> <a href="/privacy">Privacy Policy</a> <a href="/terms">Terms of Service</a></p>""",
     )
 
@@ -140,8 +149,7 @@ async def privacy_policy(request: Request):
         <h3>1.2 Google and YouTube Data</h3>
         <p>Through the YouTube API, we access the following specific Google user data:</p>
         <ul>
-            <li><strong>YouTube Subscriptions List:</strong> We retrieve your complete list of YouTube channels you are subscribed to.</li>
-            <li><strong>YouTube Subscription Status:</strong> We determine whether you are subscribed to a specific channel ID provided by the server administrator.</li>
+            <li><strong>YouTube Subscription Status:</strong> We ask YouTube whether you are subscribed to the channel chosen by the server administrator. We do not retrieve or store your list of subscriptions.</li>
             <li><strong>YouTube Subscription Date:</strong> We read the date you subscribed to that channel to assign tier roles. It is not stored.</li>
             <li><strong>YouTube Account Identifier:</strong> We store a one-way hash of your YouTube channel ID so that one YouTube account cannot be linked to multiple members of the same server.</li>
             <li><strong>OAuth2 Refresh Token:</strong> We securely store an offline access token to periodically re-check your subscription status without requiring re-authentication. </li>
@@ -184,13 +192,14 @@ async def privacy_policy(request: Request):
         </ul>
         <p>However, no method of electronic transmission or storage is 100% secure. While we implement reasonable security measures, we cannot guarantee absolute security of your information.</p>
         <h2>6. Data Retention and Deletion</h2>
-        <p>Your authentication tokens are stored securely in our database only as long as necessary to provide the service. If you wish to revoke our access at any time, you can do so from your <a href="https://myaccount.google.com/permissions" target="_blank">Google Account Permissions page</a>. Revoking access will result in:</p>
+        <p>Your authentication tokens are stored securely in our database only as long as necessary to provide the service. If you wish to revoke our access at any time, you can do so from your <a href="https://security.google.com/settings/security/permissions" target="_blank">Google Account Permissions page</a>. Revoking access will result in:</p>
         <ul>
             <li>Automatic removal of your "Subscriber" role on Discord during the next verification check</li>
             <li>Deletion of your stored refresh token from our database</li>
+            <li>Stored tokens that could not be re-checked for 30 days are deleted as well</li>
             <li>Cessation of all subscription verification checks for your account</li>
         </ul>
-        <p><strong>Data Requests:</strong> You have the right to request access to, edit, or delete your personal data. All such requests will be processed within 30 days of receipt. To submit a data request, deletion request, or to receive your data package, please contact us at <a href="mailto:ian@iancheung.dev">ian@iancheung.dev</a> with your Discord ID and details of your request.</p>
+        <p><strong>Data Requests:</strong> You have the right to request access to, edit, or delete your personal data. All such requests will be processed within 7 days of receipt. To submit a data request, deletion request, or to receive your data package, please contact us at <a href="mailto:ian@iancheung.dev">ian@iancheung.dev</a> with your Discord ID and details of your request.</p>
         <h2>7. Service Providers</h2>
         <p>We may employ third-party companies and individuals to facilitate our service, including:</p>
         <ul>
@@ -222,7 +231,7 @@ async def terms_of_service(request: Request):
         <p>Last updated: {datetime.datetime.now().strftime("%B %d, %Y")}</p>
         <p>By using the <strong>Subscriber Role</strong> Discord bot, you agree to the following terms and conditions.</p>
         <h2>1. Acceptance of Terms</h2>
-        <p>By inviting and using the Subscriber Role bot in your Discord server, you agree to be bound by these Terms of Service. If you do not agree with any of these terms, you should not use the bot.</p>
+        <p>By inviting and using the Subscriber Role bot in your Discord server, you agree to be bound by these Terms of Service. The bot uses YouTube API Services, so by using it you also agree to be bound by the <a href="https://www.youtube.com/t/terms" target="_blank">YouTube Terms of Service</a>. If you do not agree with any of these terms, you should not use the bot.</p>
         <h2>2. Use of the Bot</h2>
         <p>The Subscriber Role bot is provided as-is for the purpose of verifying YouTube channel subscriptions and assigning Discord roles. You agree to use this bot in compliance with Discord's Terms of Service and Community Guidelines.</p>
         <h2>3. User Responsibilities</h2>
