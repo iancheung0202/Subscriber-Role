@@ -15,6 +15,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from database import (
+    add_quota_usage,
     claim_account_hash,
     clear_stale_refresh_tokens,
     clear_user_refresh_token,
@@ -22,12 +23,15 @@ from database import (
     delete_server_config,
     get_all_server_configs,
     get_guild_stats,
+    get_last_sync,
     get_pool,
+    get_quota_usage,
     get_server_config_by_id,
     get_server_configs_for_guild,
     get_tiers,
     get_user_id,
     hash_account,
+    set_last_sync,
     set_server_config,
     set_stack_tiers,
     set_tier,
@@ -317,7 +321,7 @@ class ConfigurationEditView(View):
             channel_name = await get_youtube_channel_name(self.yt_channel_id)
             yt_status = f"{CHECK} [{channel_name}]({yt_url})"
         else:
-            yt_status = f"{CROSS} Not set. [How to find my Channel ID?](https://support.google.com/youtube/answer/3250431)."
+            yt_status = f"{CROSS} Not set. [How to find my Channel ID?](https://support.google.com/youtube/answer/3250431)"
         embed.add_field(name=f"YouTube Channel {YT}", value=yt_status, inline=False)
         role_status = (
             f"{CHECK} <@&{self.role_id}>" if self.role_id else f"{CROSS} Not set"
@@ -1105,9 +1109,7 @@ class VerifyChannelSelectView(View):
     ):
         guild_id = interaction.guild_id
         client_id = os.environ.get("GOOGLE_CLIENT_ID")
-        redirect_uri = os.environ.get(
-            "OAUTH_REDIRECT_URI", "http://subscriber.iancheung.dev/callback"
-        )
+        redirect_uri = os.environ["OAUTH_REDIRECT_URI"]
         state_secret = os.environ.get("STATE_SECRET")
         if not state_secret:
             await interaction.followup.send(
@@ -1365,10 +1367,11 @@ async def log_action(guild_id: int, message: str, color=COLOR, server_id: int = 
             await channel.send(embed=embed)
 
 
-SYNC_DAILY_LIMIT = int(os.environ.get("SYNC_DAILY_LIMIT") or 9000)
-SYNC_BATCH_SIZE = 5
-SYNC_RECHECK_HOURS = 20
-PREMIUM_RECHECK_HOURS = 10
+SYNC_INTERVAL_HOURS = int(os.environ["SYNC_INTERVAL_HOURS"])
+SYNC_RECHECK_HOURS = int(os.environ["SYNC_RECHECK_HOURS"])
+SYNC_BATCH_SIZE = int(os.environ["SYNC_BATCH_SIZE"])
+SYNC_DAILY_LIMIT = int(os.environ.get("SYNC_DAILY_LIMIT") or 0)
+TOKEN_RETENTION_DAYS = int(os.environ["TOKEN_RETENTION_DAYS"])
 QUOTA_REASONS = ("quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded")
 
 
@@ -1455,6 +1458,7 @@ async def sync_member(row, target: dict, stats: dict):
     refresh_token = decrypt_token(row["refresh_token"])
     if not refresh_token:
         return
+    await add_quota_usage()
     snippet = await asyncio.to_thread(
         check_subscription, refresh_token, yt_channel_id, discord_id
     )
@@ -1560,6 +1564,7 @@ async def run_sync() -> dict:
         "failed": 0,
         "remaining": 0,
         "quota_hit": False,
+        "limit_hit": False,
     }
     targets = {}
     for config in await get_all_server_configs():
@@ -1584,13 +1589,14 @@ async def run_sync() -> dict:
             and target["config"]["guild_id"] in premium_guilds
         ]
     now = datetime.datetime.now()
+    slack = datetime.timedelta(hours=SYNC_INTERVAL_HOURS) / 2
     pool = await get_pool()
     async with pool.acquire() as connection:
         rows = await connection.fetch(
             "SELECT s.id AS server_id, s.guild_id, u.id AS user_id, u.discord_id, u.refresh_token, u.yt_account_hash, sub.last_checked FROM servers s JOIN users u ON u.guild_id = s.guild_id LEFT JOIN subscriptions sub ON sub.user_id = u.id AND sub.server_id = s.id WHERE u.refresh_token IS NOT NULL AND (sub.last_checked IS NULL OR sub.last_checked < $1) ORDER BY sub.last_checked ASC NULLS FIRST, u.id",
-            now - datetime.timedelta(hours=PREMIUM_RECHECK_HOURS),
+            now - slack,
         )
-    stale = now - datetime.timedelta(hours=SYNC_RECHECK_HOURS)
+    stale = now - datetime.timedelta(hours=SYNC_RECHECK_HOURS) + slack
     rows = [
         row
         for row in rows
@@ -1603,9 +1609,11 @@ async def run_sync() -> dict:
     ]
     rows.sort(key=lambda row: row["guild_id"] not in premium_guilds)
     stats["remaining"] = len(rows)
-    limit = SYNC_DAILY_LIMIT // 2
-    for start in range(0, min(len(rows), limit), SYNC_BATCH_SIZE):
-        batch = rows[start : min(start + SYNC_BATCH_SIZE, limit)]
+    for start in range(0, len(rows), SYNC_BATCH_SIZE):
+        batch = rows[start : start + SYNC_BATCH_SIZE]
+        if SYNC_DAILY_LIMIT and await get_quota_usage() + len(batch) > SYNC_DAILY_LIMIT:
+            stats["limit_hit"] = True
+            break
         for row in batch:
             target = targets[row["server_id"]]
             if "channel_name" not in target:
@@ -1628,15 +1636,18 @@ async def run_sync() -> dict:
             print("YouTube quota exhausted, stopping sync until the next run.")
             break
         await asyncio.sleep(1)
-    if not stats["quota_hit"] and not stats["remaining"]:
-        await clear_stale_refresh_tokens(now - datetime.timedelta(days=30))
+    if not stats["remaining"]:
+        await clear_stale_refresh_tokens(
+            now - datetime.timedelta(days=TOKEN_RETENTION_DAYS)
+        )
     return stats
 
 
-@tasks.loop(hours=12)
+@tasks.loop(hours=SYNC_INTERVAL_HOURS)
 async def sync_roles():
     print("Running background sync task...")
     try:
+        await set_last_sync(datetime.datetime.now())
         stats = await run_sync()
     except Exception as e:
         traceback.print_exc()
@@ -1646,8 +1657,14 @@ async def sync_roles():
             discord.Color.red(),
         )
         return
-    summary = f"Checked {stats['checked']:,} members, removed {stats['removed']:,} roles, added {stats['added']:,} roles, {stats['failed']:,} checks failed, {stats['remaining']:,} left for the next run."
-    if stats["quota_hit"]:
+    summary = f"Checked {stats['checked']:,} members, removed {stats['removed']:,} roles, added {stats['added']:,} roles, {stats['failed']:,} checks failed, {stats['remaining']:,} left for the next run. {await get_quota_usage():,} quota units used today."
+    if stats["limit_hit"]:
+        await owner_log(
+            "SYNC_LOG_CHANNEL_ID",
+            f"{WARN} Sync paused at the daily limit. {summary}",
+            discord.Color.orange(),
+        )
+    elif stats["quota_hit"]:
         await owner_log(
             "SYNC_LOG_CHANNEL_ID",
             f"{WARN} Sync stopped because the YouTube quota ran out. {summary}",
@@ -1656,3 +1673,15 @@ async def sync_roles():
     else:
         await owner_log("SYNC_LOG_CHANNEL_ID", f"{CHECK} Sync completed. {summary}")
     print(f"Background sync task completed. {summary}")
+
+
+@sync_roles.before_loop
+async def wait_for_schedule():
+    now = datetime.datetime.now()
+    last_run = await get_last_sync()
+    if not last_run:
+        last_run = now
+        await set_last_sync(now)
+    next_run = last_run + datetime.timedelta(hours=SYNC_INTERVAL_HOURS)
+    if next_run > now:
+        await asyncio.sleep((next_run - now).total_seconds())

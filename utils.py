@@ -5,9 +5,11 @@ import os
 import discord
 from googleapiclient.discovery import build
 
-from database import get_channel_name, set_channel_name
+from database import add_quota_usage, get_channel_name, set_channel_name
 
-CHANNEL_NAME_TTL = datetime.timedelta(hours=24)
+CHANNEL_NAME_TTL = datetime.timedelta(
+    hours=int(os.environ["CHANNEL_NAME_REFRESH_HOURS"])
+)
 
 
 def fetch_youtube_channel_name(channel_id: str):
@@ -25,6 +27,7 @@ async def get_youtube_channel_name(channel_id: str) -> str:
     if cached and datetime.datetime.now() - cached["updated_at"] < CHANNEL_NAME_TTL:
         return cached["name"]
     try:
+        await add_quota_usage()
         name = await asyncio.to_thread(fetch_youtube_channel_name, channel_id)
         if name:
             await set_channel_name(channel_id, name)

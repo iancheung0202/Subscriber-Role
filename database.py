@@ -3,6 +3,7 @@ import datetime
 import hashlib
 import hmac
 import os
+import zoneinfo
 
 import asyncpg
 from cryptography.fernet import Fernet, InvalidToken
@@ -105,6 +106,12 @@ async def init_db():
             )
             await connection.execute(
                 "CREATE TABLE IF NOT EXISTS channel_names (yt_channel_id TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at TIMESTAMP NOT NULL)"
+            )
+            await connection.execute(
+                "CREATE TABLE IF NOT EXISTS quota_usage (day DATE PRIMARY KEY, units INTEGER NOT NULL)"
+            )
+            await connection.execute(
+                "CREATE TABLE IF NOT EXISTS sync_state (id BOOLEAN PRIMARY KEY DEFAULT TRUE, last_run TIMESTAMP NOT NULL)"
             )
             await _encrypt_existing_tokens(connection)
         pool = new_pool
@@ -340,4 +347,44 @@ async def set_channel_name(yt_channel_id: str, name: str):
             yt_channel_id,
             name,
             datetime.datetime.now(),
+        )
+
+
+def quota_day() -> datetime.date:
+    return datetime.datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles")).date()
+
+
+async def add_quota_usage(units: int = 1):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "INSERT INTO quota_usage (day, units) VALUES ($1, $2) ON CONFLICT (day) DO UPDATE SET units = quota_usage.units + EXCLUDED.units",
+            quota_day(),
+            units,
+        )
+
+
+async def get_quota_usage() -> int:
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        return (
+            await connection.fetchval(
+                "SELECT units FROM quota_usage WHERE day = $1", quota_day()
+            )
+            or 0
+        )
+
+
+async def get_last_sync():
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        return await connection.fetchval("SELECT last_run FROM sync_state")
+
+
+async def set_last_sync(last_run: datetime.datetime):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "INSERT INTO sync_state (id, last_run) VALUES (TRUE, $1) ON CONFLICT (id) DO UPDATE SET last_run = EXCLUDED.last_run",
+            last_run,
         )

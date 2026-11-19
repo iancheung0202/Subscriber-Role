@@ -19,6 +19,7 @@ from slowapi.util import get_remote_address
 
 from bot import bot, get_premium_guild_ids, log_action, sync_tier_roles
 from database import (
+    add_quota_usage,
     clear_user_refresh_token,
     decrypt_token,
     get_account_holder,
@@ -40,7 +41,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.environ.get("CORS_ORIGIN", "http://subscriber.iancheung.dev")],
+    allow_origins=[os.environ["CORS_ORIGIN"]],
     allow_credentials=True,
     allow_methods=["GET"],
     allow_headers=["Content-Type"],
@@ -48,7 +49,7 @@ app.add_middleware(
 )
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=[os.environ.get("ALLOWED_HOST", "subscriber.iancheung.dev")],
+    allowed_hosts=[os.environ["ALLOWED_HOST"]],
 )
 
 BOT_AVATAR = "https://iancheung.dev/assets/img/subscriber-role.png"
@@ -196,7 +197,7 @@ async def privacy_policy(request: Request):
         <ul>
             <li>Automatic removal of your "Subscriber" role on Discord during the next verification check</li>
             <li>Deletion of your stored refresh token from our database</li>
-            <li>Stored tokens that could not be re-checked for 30 days are deleted as well</li>
+            <li>Stored tokens that could not be re-checked for {os.environ['TOKEN_RETENTION_DAYS']} days are deleted as well</li>
             <li>Cessation of all subscription verification checks for your account</li>
         </ul>
         <p><strong>Data Requests:</strong> You have the right to request access to, edit, or delete your personal data. All such requests will be processed within 7 days of receipt. To submit a data request, deletion request, or to receive your data package, please contact us at <a href="mailto:ian@iancheung.dev">ian@iancheung.dev</a> with your Discord ID and details of your request.</p>
@@ -352,9 +353,7 @@ async def callback(request: Request):
     yt_channel_id = server_config["yt_channel_id"]
     channel_name = await get_youtube_channel_name(yt_channel_id)
     role_id = server_config["role_id"]
-    redirect_uri = os.environ.get(
-        "OAUTH_REDIRECT_URI", "http://subscriber.iancheung.dev/callback"
-    )
+    redirect_uri = os.environ["OAUTH_REDIRECT_URI"]
     token_response = await get_tokens(code, redirect_uri)
     if "error" in token_response:
         return HTMLResponse(
@@ -390,6 +389,7 @@ async def callback(request: Request):
         client_id=os.environ["GOOGLE_CLIENT_ID"],
         client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     )
+    await add_quota_usage()
     snippet = await asyncio.to_thread(check_subscriptions, creds, yt_channel_id)
     if snippet is None:
         return HTMLResponse(
