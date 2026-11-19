@@ -28,7 +28,6 @@ def encrypt_token(token: str) -> str:
 
 
 def decrypt_token(stored: str) -> str:
-    """Returns the refresh token. Rows written before encryption was added are returned as is."""
     if not stored:
         return stored
     try:

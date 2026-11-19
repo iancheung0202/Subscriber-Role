@@ -34,7 +34,7 @@
 
 This project is licensed under the **AGPL-3.0**, which means you are free to fork and self-host this bot. However, the setup involves multiple external services (Discord, Google Cloud, YouTube Data API, a database, and a publicly accessible server) and is non-trivial. **No support will be provided for self-hosting.** You're on your own.
 
-Copy `.env.example` to `.env` and fill it in. `TOKEN_ENCRYPTION_KEY` is required and encrypts the stored Google refresh tokens: generate one with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` and keep a backup, since losing it means every member has to verify again. `GUILD_LOG_CHANNEL_ID`, `COMMAND_LOG_CHANNEL_ID` and `PREMIUM_LOG_CHANNEL_ID` are optional channels for the bot owner's logs (server joins and leaves, slash command usage, premium changes). Leave one empty to turn that log off.
+**Note:** Generate `TOKEN_ENCRYPTION_KEY` in `.env` with `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
 
 ## Privacy & Data
 

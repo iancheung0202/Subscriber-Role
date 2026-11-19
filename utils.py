@@ -1,20 +1,36 @@
+import asyncio
 import os
+import time
 
 import discord
 from googleapiclient.discovery import build
 
+CHANNEL_NAME_TTL = 6 * 60 * 60
+_channel_names = {}
+
+
+def fetch_youtube_channel_name(channel_id: str):
+    youtube = build("youtube", "v3", developerKey=os.environ.get("GOOGLE_API_KEY"))
+    request = youtube.channels().list(part="snippet", id=channel_id)
+    response = request.execute()
+    items = response.get("items", [])
+    if items:
+        return items[0]["snippet"]["title"]
+    return None
+
 
 async def get_youtube_channel_name(channel_id: str) -> str:
+    cached = _channel_names.get(channel_id)
+    if cached and time.monotonic() - cached[1] < CHANNEL_NAME_TTL:
+        return cached[0]
     try:
-        youtube = build("youtube", "v3", developerKey=os.environ.get("GOOGLE_API_KEY"))
-        request = youtube.channels().list(part="snippet", id=channel_id)
-        response = request.execute()
-        items = response.get("items", [])
-        if items:
-            return items[0]["snippet"]["title"]
+        name = await asyncio.to_thread(fetch_youtube_channel_name, channel_id)
+        if name:
+            _channel_names[channel_id] = (name, time.monotonic())
+            return name
     except Exception as e:
         print(f"Error fetching YouTube channel name for {channel_id}: {e}")
-    return "Unknown Channel"
+    return cached[0] if cached else "Unknown Channel"
 
 
 CHECK = "<:checkmark:1490467092296761384>"

@@ -100,10 +100,10 @@ async def home_page(request: Request):
         <p>This is a simple Discord bot designed to verify whether a Discord user is subscribed to a specific YouTube channel. It uses the YouTube API to securely check the user's subscription status. If verified, the user is automatically granted a designated "Subscriber" role within the Discord server.</p>
         <h3>For Server Admins</h3>
         <p>Run the <code>/setup</code> command (requires administrator permissions) to configure the bot for your server. You'll need to specify a YouTube channel and subscriber role.</p>
-        <h3>For Members</h3>
-        <p>Run the <code>/verify</code> command to link your YouTube account and verify your subscription. You will get the subscriber role as long as you're subscribed to the configured channel.</p>
         <h3>Premium</h3>
-        <p>The bot is free for one YouTube channel per server. Premium adds up to 5 YouTube channels, a custom message when a member verifies, and a custom message when a member loses the role. Run the <code>/premium</code> command in your server to upgrade.</p>
+        <p>The bot is completely free-to-use for one YouTube channel every server. Premium allows you to add up to 5 YouTube channels every server, a custom message when a member verifies, and a custom message when a member unsubscribes. Run the <code>/premium</code> command in your server to upgrade.</p>
+        <h3>For Server Members</h3>
+        <p>Run the <code>/verify</code> command to link your YouTube account and verify your subscription. You will get the subscriber role as long as you're subscribed to the configured channel.</p>
         <p><a href="https://github.com/iancheung0202/Subscriber-Role">GitHub</a> <a href="/privacy">Privacy Policy</a> <a href="/terms">Terms of Service</a></p>""",
     )
 

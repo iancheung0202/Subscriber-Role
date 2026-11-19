@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import hashlib
 import hmac
 import os
@@ -11,6 +12,7 @@ from discord.ui import Button, ChannelSelect, Modal, RoleSelect, Select, TextInp
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from database import (
     decrypt_token,
@@ -85,7 +87,6 @@ bot = Bot(command_prefix="!", intents=intents)
 
 
 async def owner_log(env_var: str, message: str, color=COLOR):
-    """Sends an embed to one of the bot owner's log channels. Does nothing if the env var is unset."""
     channel_id = os.environ.get(env_var)
     if not channel_id:
         return
@@ -1190,146 +1191,214 @@ async def log_action(guild_id: int, message: str, color=COLOR, server_id: int = 
             await channel.send(embed=embed)
 
 
+SYNC_DAILY_LIMIT = int(os.environ.get("SYNC_DAILY_LIMIT") or 9000)
+SYNC_BATCH_SIZE = 5
+SYNC_RECHECK_HOURS = 20
+QUOTA_REASONS = ("quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded")
+
+
+class QuotaExhausted(Exception):
+    pass
+
+
+def check_subscription(refresh_token: str, yt_channel_id: str, discord_id: int):
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=os.environ["GOOGLE_CLIENT_ID"],
+        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+    )
+    try:
+        youtube = build("youtube", "v3", credentials=creds)
+        req = youtube.subscriptions().list(
+            part="snippet", mine=True, forChannelId=yt_channel_id
+        )
+        res = req.execute()
+        items = res.get("items", [])
+        return len(items) > 0
+    except RefreshError as e:
+        if "invalid_grant" in str(e):
+            return False
+        print(f"Could not refresh token for {discord_id}: {e}")
+        return None
+    except HttpError as e:
+        if any(reason in str(e) for reason in QUOTA_REASONS):
+            raise QuotaExhausted(str(e))
+        print(f"Error for {discord_id}: {e}")
+        return None
+    except Exception as e:
+        print(f"Error for {discord_id}: {e}")
+        return None
+
+
+async def sync_member(row, target: dict, stats: dict):
+    config = target["config"]
+    guild = target["guild"]
+    role = target["role"]
+    channel_name = target["channel_name"]
+    server_id = config["id"]
+    guild_id = config["guild_id"]
+    yt_channel_id = config["yt_channel_id"]
+    yt_channel_url = f"https://www.youtube.com/channel/{yt_channel_id}"
+    user_id = row["user_id"]
+    discord_id = row["discord_id"]
+    refresh_token = decrypt_token(row["refresh_token"])
+    if not refresh_token:
+        return
+    is_subscribed = await asyncio.to_thread(
+        check_subscription, refresh_token, yt_channel_id, discord_id
+    )
+    if is_subscribed is None:
+        stats["failed"] += 1
+        return
+    try:
+        member = await guild.fetch_member(discord_id)
+    except discord.errors.NotFound:
+        member = None
+    if member:
+        has_role = role in member.roles
+        if not is_subscribed and has_role:
+            try:
+                await member.remove_roles(role)
+                stats["removed"] += 1
+                if config.get("unsubscribe_dm_content"):
+                    try:
+                        dm_embed = discord.Embed(
+                            description=config["unsubscribe_dm_content"],
+                            color=0xAF4875,
+                        )
+                        dm_embed.set_footer(text=f"Sent from {guild.name}")
+                        await member.send(embed=dm_embed)
+                    except Exception as e:
+                        print(f"Error sending unsubscribe DM to {discord_id}: {e}")
+                try:
+                    await log_action(
+                        guild_id,
+                        f"{NEUTRAL} Removed {role.mention} from <@{discord_id}> because they are no longer subscribed to [{channel_name}]({yt_channel_url}).",
+                        discord.Color.red(),
+                        server_id=server_id,
+                    )
+                except Exception as e:
+                    print(f"Role removed but failed to log: {e}")
+            except discord.errors.Forbidden:
+                print(f"Failed to remove role from {discord_id}: Bot lacks permission.")
+                try:
+                    await log_action(
+                        guild_id,
+                        f"{CROSS} Attempted to remove {role.mention} from <@{discord_id}> for [{channel_name}]({yt_channel_url}) but bot lacks permission in role hierarchy.",
+                        discord.Color.orange(),
+                        server_id=server_id,
+                    )
+                except Exception:
+                    pass
+        if is_subscribed and not has_role:
+            try:
+                await member.add_roles(role)
+                stats["added"] += 1
+                try:
+                    await log_action(
+                        guild_id,
+                        f"{CHECK} Added {role.mention} to <@{discord_id}> because they subscribed to [{channel_name}]({yt_channel_url}).",
+                        discord.Color.green(),
+                        server_id=server_id,
+                    )
+                except Exception as e:
+                    print(f"Role added but failed to log: {e}")
+            except discord.errors.Forbidden:
+                print(f"Failed to add role to {discord_id}: Bot lacks permission.")
+                try:
+                    await log_action(
+                        guild_id,
+                        f"{CROSS} Attempted to add {role.mention} to <@{discord_id}> for [{channel_name}]({yt_channel_url}) but bot lacks permission in role hierarchy.",
+                        discord.Color.orange(),
+                        server_id=server_id,
+                    )
+                except Exception:
+                    pass
+    await update_subscription_status(user_id, server_id, yt_channel_id, is_subscribed)
+    stats["checked"] += 1
+
+
+async def run_sync() -> dict:
+    stats = {
+        "checked": 0,
+        "removed": 0,
+        "added": 0,
+        "failed": 0,
+        "remaining": 0,
+        "quota_hit": False,
+    }
+    targets = {}
+    for config in await get_all_server_configs():
+        guild = bot.get_guild(config["guild_id"])
+        if not guild:
+            print(f"Guild {config['guild_id']} not found, skipping...")
+            continue
+        role = guild.get_role(config["role_id"])
+        if not role:
+            print(
+                f"Role {config['role_id']} not found in guild {config['guild_id']}, skipping..."
+            )
+            continue
+        targets[config["id"]] = {"config": config, "guild": guild, "role": role}
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        rows = await connection.fetch(
+            "SELECT s.id AS server_id, u.id AS user_id, u.discord_id, u.refresh_token FROM servers s JOIN users u ON u.guild_id = s.guild_id LEFT JOIN subscriptions sub ON sub.user_id = u.id AND sub.server_id = s.id WHERE u.refresh_token IS NOT NULL AND (sub.last_checked IS NULL OR sub.last_checked < $1) ORDER BY sub.last_checked ASC NULLS FIRST, u.id",
+            datetime.datetime.now() - datetime.timedelta(hours=SYNC_RECHECK_HOURS),
+        )
+    rows = [row for row in rows if row["server_id"] in targets]
+    stats["remaining"] = len(rows)
+    for start in range(0, min(len(rows), SYNC_DAILY_LIMIT), SYNC_BATCH_SIZE):
+        batch = rows[start : min(start + SYNC_BATCH_SIZE, SYNC_DAILY_LIMIT)]
+        for row in batch:
+            target = targets[row["server_id"]]
+            if "channel_name" not in target:
+                target["channel_name"] = await get_youtube_channel_name(
+                    target["config"]["yt_channel_id"]
+                )
+        results = await asyncio.gather(
+            *[sync_member(row, targets[row["server_id"]], stats) for row in batch],
+            return_exceptions=True,
+        )
+        stats["remaining"] -= len(batch)
+        for row, result in zip(batch, results):
+            if isinstance(result, QuotaExhausted):
+                stats["quota_hit"] = True
+                stats["remaining"] += 1
+            elif isinstance(result, Exception):
+                stats["failed"] += 1
+                print(f"Error syncing {row['discord_id']}: {result}")
+        if stats["quota_hit"]:
+            print("YouTube quota exhausted, stopping sync until the next run.")
+            break
+        await asyncio.sleep(1)
+    return stats
+
+
 @tasks.loop(hours=24)
 async def sync_roles():
     print("Running background sync task...")
-    pool = await get_pool()
-    all_configs = await get_all_server_configs()
-    for config in all_configs:
-        server_id = config["id"]
-        guild_id = config["guild_id"]
-        yt_channel_id = config["yt_channel_id"]
-        role_id = config["role_id"]
-        yt_channel_url = f"https://www.youtube.com/channel/{yt_channel_id}"
-        channel_name = await get_youtube_channel_name(yt_channel_id)
-        guild = bot.get_guild(guild_id)
-        if not guild:
-            print(f"Guild {guild_id} not found, skipping...")
-            continue
-        role = guild.get_role(role_id)
-        if not role:
-            print(f"Role {role_id} not found in guild {guild_id}, skipping...")
-            continue
-        async with pool.acquire() as connection:
-            rows = await connection.fetch(
-                "SELECT id, discord_id, refresh_token FROM users WHERE guild_id = $1",
-                guild_id,
-            )
-            semaphore = asyncio.Semaphore(10)
-
-            async def process_user(row):
-                async with semaphore:
-                    user_id = row["id"]
-                    discord_id = row["discord_id"]
-                    refresh_token = decrypt_token(row["refresh_token"])
-                    if not refresh_token:
-                        return
-                    creds = Credentials(
-                        token=None,
-                        refresh_token=refresh_token,
-                        token_uri="https://oauth2.googleapis.com/token",
-                        client_id=os.environ["GOOGLE_CLIENT_ID"],
-                        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-                    )
-
-                    def check_sub():
-                        try:
-                            youtube = build("youtube", "v3", credentials=creds)
-                            req = youtube.subscriptions().list(
-                                part="snippet", mine=True, forChannelId=yt_channel_id
-                            )
-                            res = req.execute()
-                            items = res.get("items", [])
-                            return len(items) > 0
-                        except RefreshError as e:
-                            # The member revoked access, so it can no longer be verified.
-                            if "invalid_grant" in str(e):
-                                return False
-                            print(f"Could not refresh token for {discord_id}: {e}")
-                            return None
-                        except Exception as e:
-                            print(f"Error for {discord_id}: {e}")
-                            return None
-
-                    is_subscribed = await asyncio.to_thread(check_sub)
-                    # The check failed (quota, outage, network): leave the role as it is.
-                    if is_subscribed is None:
-                        return
-                    try:
-                        member = await guild.fetch_member(discord_id)
-                    except discord.errors.NotFound:
-                        member = None
-                    if member:
-                        has_role = role in member.roles
-                        if not is_subscribed and has_role:
-                            try:
-                                await member.remove_roles(role)
-                                if config.get("unsubscribe_dm_content"):
-                                    try:
-                                        dm_embed = discord.Embed(
-                                            description=config[
-                                                "unsubscribe_dm_content"
-                                            ],
-                                            color=0xAF4875,
-                                        )
-                                        dm_embed.set_footer(
-                                            text=f"Sent from {guild.name}"
-                                        )
-                                        await member.send(embed=dm_embed)
-                                    except Exception as e:
-                                        print(
-                                            f"Error sending unsubscribe DM to {discord_id}: {e}"
-                                        )
-                                try:
-                                    await log_action(
-                                        guild_id,
-                                        f"{NEUTRAL} Removed {role.mention} from <@{discord_id}> because they are no longer subscribed to [{channel_name}]({yt_channel_url}).",
-                                        discord.Color.red(),
-                                        server_id=server_id,
-                                    )
-                                except Exception as e:
-                                    print(f"Role removed but failed to log: {e}")
-                            except discord.errors.Forbidden:
-                                print(
-                                    f"Failed to remove role from {discord_id}: Bot lacks permission."
-                                )
-                                try:
-                                    await log_action(
-                                        guild_id,
-                                        f"{CROSS} Attempted to remove {role.mention} from <@{discord_id}> for [{channel_name}]({yt_channel_url}) but bot lacks permission in role hierarchy.",
-                                        discord.Color.orange(),
-                                        server_id=server_id,
-                                    )
-                                except Exception:
-                                    pass
-                        if is_subscribed and not has_role:
-                            try:
-                                await member.add_roles(role)
-                                try:
-                                    await log_action(
-                                        guild_id,
-                                        f"{CHECK} Added {role.mention} to <@{discord_id}> because they subscribed to [{channel_name}]({yt_channel_url}).",
-                                        discord.Color.green(),
-                                        server_id=server_id,
-                                    )
-                                except Exception as e:
-                                    print(f"Role added but failed to log: {e}")
-                            except discord.errors.Forbidden:
-                                print(
-                                    f"Failed to add role to {discord_id}: Bot lacks permission."
-                                )
-                                try:
-                                    await log_action(
-                                        guild_id,
-                                        f"{CROSS} Attempted to add {role.mention} to <@{discord_id}> for [{channel_name}]({yt_channel_url}) but bot lacks permission in role hierarchy.",
-                                        discord.Color.orange(),
-                                        server_id=server_id,
-                                    )
-                                except Exception:
-                                    pass
-                    await update_subscription_status(
-                        user_id, server_id, yt_channel_id, is_subscribed
-                    )
-
-            await asyncio.gather(*[process_user(row) for row in rows])
-    print("Background sync task completed.")
+    try:
+        stats = await run_sync()
+    except Exception as e:
+        traceback.print_exc()
+        await owner_log(
+            "SYNC_LOG_CHANNEL_ID",
+            f"{CROSS} Daily sync failed: {e}",
+            discord.Color.red(),
+        )
+        return
+    summary = f"Checked {stats['checked']:,} members, removed {stats['removed']:,} roles, added {stats['added']:,} roles, {stats['failed']:,} checks failed, {stats['remaining']:,} left for the next run."
+    if stats["quota_hit"]:
+        await owner_log(
+            "SYNC_LOG_CHANNEL_ID",
+            f"{WARN} Daily sync stopped because the YouTube quota ran out. {summary}",
+            discord.Color.orange(),
+        )
+    else:
+        await owner_log(
+            "SYNC_LOG_CHANNEL_ID", f"{CHECK} Daily sync completed. {summary}"
+        )
+    print(f"Background sync task completed. {summary}")
