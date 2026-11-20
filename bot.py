@@ -114,7 +114,7 @@ async def owner_log(env_var: str, message: str, color=COLOR):
 
 
 def describe_guild(guild: discord.Guild) -> str:
-    return f"**{discord.utils.escape_markdown(guild.name)}** (`{guild.id}`, {guild.member_count or 0} members)"
+    return f"{discord.utils.escape_markdown(guild.name)} (`{guild.id}`, {guild.member_count or 0} members)"
 
 
 async def describe_entitlement(entitlement: discord.Entitlement) -> str:
@@ -148,7 +148,7 @@ async def on_app_command_completion(
     where = describe_guild(interaction.guild) if interaction.guild else "a DM"
     await owner_log(
         "COMMAND_LOG_CHANNEL_ID",
-        f"{ADD} `/{command.qualified_name}`\n{ROLE} <@{interaction.user.id}>\n{LOG} {where}.",
+        f"{ADD} **Command:** `/{command.qualified_name}`\n{ROLE} **User:** <@{interaction.user.id}>\n{LOG} **Server:** {where}.",
     )
 
 
