@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import logging
 import os
 
 import discord
@@ -33,7 +34,7 @@ async def get_youtube_channel_name(channel_id: str) -> str:
             await set_channel_name(channel_id, name)
             return name
     except Exception as e:
-        print(f"Error fetching YouTube channel name for {channel_id}: {e}")
+        logging.error(f"Error fetching YouTube channel name for {channel_id}: {e}")
     return cached["name"] if cached else "Unknown Channel"
 
 

@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 stats/
+backups/
+.venv/
+.pytest_cache/

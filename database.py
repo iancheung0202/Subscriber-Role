@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import hashlib
 import hmac
+import logging
 import os
 import zoneinfo
 
@@ -20,7 +21,7 @@ def _get_fernet() -> Fernet:
         if not key:
             raise RuntimeError(
                 "TOKEN_ENCRYPTION_KEY is not set. Generate one with: "
-                'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+                'python -c "from cryptography.fernet import Fernet; logging.info(Fernet.generate_key().decode())"'
             )
         _fernet = Fernet(key.encode())
     return _fernet
@@ -67,7 +68,7 @@ async def _encrypt_existing_tokens(connection):
             )
             migrated += 1
     if migrated:
-        print(f"Encrypted {migrated} stored refresh tokens")
+        logging.info(f"Encrypted {migrated} stored refresh tokens")
 
 
 async def init_db():

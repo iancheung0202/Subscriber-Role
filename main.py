@@ -1,10 +1,12 @@
 import asyncio
+import logging
 import os
 
 import uvicorn
 from dotenv import load_dotenv
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 from api import app
 from bot import bot
@@ -14,7 +16,7 @@ async def main():
     token = os.environ.get("DISCORD_TOKEN")
 
     if not token:
-        print("Missing Discord token")
+        logging.error("Missing Discord token")
         return
 
     config = uvicorn.Config(app=app, host="0.0.0.0", port=4700, log_level="info")

@@ -3,7 +3,9 @@ import datetime
 import hashlib
 import hmac
 import html
+import logging
 import os
+import pathlib
 
 import aiohttp
 import discord
@@ -17,7 +19,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from bot import bot, get_premium_guild_ids, log_action, sync_tier_roles
+from bot import bot, log_action
 from database import (
     add_quota_usage,
     clear_user_refresh_token,
@@ -32,6 +34,7 @@ from database import (
     update_subscription_status,
     update_user_refresh_token,
 )
+from sync import get_premium_guild_ids, sync_tier_roles
 from utils import CHECK, CROSS, NEUTRAL, get_youtube_channel_name
 
 app = FastAPI()
@@ -53,15 +56,22 @@ app.add_middleware(
 )
 
 BOT_AVATAR = "https://iancheung.dev/assets/img/subscriber-role.png"
+PAGES = pathlib.Path(__file__).parent / "pages"
+
+
+def page(name: str) -> str:
+    template = (PAGES / f"{name}.html").read_text()
+    return template.format(
+        date=datetime.datetime.now().strftime("%B %d, %Y"),
+        retention_days=os.environ["TOKEN_RETENTION_DAYS"],
+    )
 
 
 def generate_page(
     title: str, description: str, url: str, body_html: str, centered: bool = False
 ) -> str:
-    if centered:
-        styles = "body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; text-align: center; } a { color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; } a:hover { opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); } a:active { transform: translateY(0); } footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }"
-    else:
-        styles = "body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; } a { color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; } a:hover { opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); } a:active { transform: translateY(0); } footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }"
+    align = " text-align: center;" if centered else ""
+    styles = f"body {{ font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6;{align} }} a {{ color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; }} a:hover {{ opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }} a:active {{ transform: translateY(0); }} footer {{ text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }}"
     footer_html = (
         "<footer><p>Developed by Ian Cheung • All rights reserved.</p></footer>"
     )
@@ -106,20 +116,7 @@ async def home_page(request: Request):
         "Subscriber Role - Discord Bot",
         "Verify YouTube channel subscriptions and automatically assign Discord roles with Subscriber Role bot.",
         "https://subscriber.iancheung.dev/",
-        """<h1>Subscriber Role</h1>
-        <p>Welcome to the <strong>Subscriber Role</strong> Discord application.</p>
-        <p><a href="https://discord.com/oauth2/authorize?client_id=1490081882140840016">Invite the bot to your server</a></p>
-        <h2>What does this app do?</h2>
-        <p>This is a simple Discord bot designed to verify whether a Discord user is subscribed to a specific YouTube channel. It uses the YouTube API to securely check the user's subscription status. If verified, the user is automatically granted a designated "Subscriber" role within the Discord server.</p>
-        <h3>For Server Admins</h3>
-        <p>Run the <code>/setup</code> command (requires administrator permissions) to configure the bot for your server. You'll need to specify a YouTube channel and subscriber role.</p>
-        <h3>Premium</h3>
-        <p>The bot is completely free-to-use for one YouTube channel every server. Premium allows you to add up to 5 YouTube channels every server, a custom message when a member verifies, a custom message when a member unsubscribes, priority subscription checks that run more often, and tier roles for long-time subscribers. Run the <code>/premium</code> command in your server to upgrade.</p>
-        <h3>For Server Members</h3>
-        <p>Run the <code>/verify</code> command to link your YouTube account and verify your subscription. You will get the subscriber role as long as you're subscribed to the configured channel.</p>
-        <p>Subscriber Role uses YouTube API Services. By using it, you agree to the following:</p>
-        <p><a href="https://www.youtube.com/t/terms" target="_blank">YouTube Terms of Service</a> <a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a></p>
-        <p><a href="https://github.com/iancheung0202/Subscriber-Role">GitHub</a> <a href="/privacy">Privacy Policy</a> <a href="/terms">Terms of Service</a></p>""",
+        page("home"),
     )
 
 
@@ -130,93 +127,7 @@ async def privacy_policy(request: Request):
         "Subscriber Role - Privacy Policy",
         "Privacy policy for Subscriber Role Discord bot. Learn how we handle your data.",
         "https://subscriber.iancheung.dev/privacy",
-        f"""<h1>Privacy Policy for Subscriber Role</h1>
-        <p><a href="/">Return to Home</a></p>
-        <p>Last updated: {datetime.datetime.now().strftime("%B %d, %Y")}</p>
-        <h2>Overview</h2>
-        <p><strong>Subscriber Role</strong> operates as a Discord bot and web service that provides subscription verification functionality. This page informs users about our policies regarding the collection, use, and disclosure of personal information. If you use our service, you agree to the collection and use of information as described in this policy. We will not use or share your information with anyone except as described herein.</p>
-        <h2>YouTube API and Google Terms of Service</h2>
-        <p>This application makes use of YouTube API services to verify your subscription status. Please review these Google and YouTube's terms and policies:</p>
-        <a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a>
-        <a href="https://www.youtube.com/t/terms" target="_blank">YouTube Terms of Service</a>
-        <p>By using our application and connecting your Google/YouTube account, you agree to be bound by YouTube's Terms of Service and Google's Privacy Policy.</p>
-        <h2>1. Information We Collect</h2>
-        <p>When you use the <code>/verify</code> command and authenticate securely through Google OAuth2, we collect the following:</p>
-        <h3>1.1 Discord Data</h3>
-        <ul>
-            <li><strong>Discord ID:</strong> Your unique identifier on Discord, allowing us to assign roles appropriately.</li>
-            <li><strong>Guild and Server Configuration:</strong> Server ID and channel configuration data associated with the Discord server.</li>
-        </ul>
-        <h3>1.2 Google and YouTube Data</h3>
-        <p>Through the YouTube API, we access the following specific Google user data:</p>
-        <ul>
-            <li><strong>YouTube Subscription Status:</strong> We ask YouTube whether you are subscribed to the channel chosen by the server administrator. We do not retrieve or store your list of subscriptions.</li>
-            <li><strong>YouTube Subscription Date:</strong> We read the date you subscribed to that channel to assign tier roles. It is not stored.</li>
-            <li><strong>YouTube Account Identifier:</strong> We store a one-way hash of your YouTube channel ID so that one YouTube account cannot be linked to multiple members of the same server.</li>
-            <li><strong>OAuth2 Refresh Token:</strong> We securely store an offline access token to periodically re-check your subscription status without requiring re-authentication. </li>
-        </ul>
-        <p><strong>Important:</strong> We only access to view your subscription data. We do <strong>NOT</strong> access your email address, password, personal contact information, watch history, private videos or playlists, YouTube comments, interactions, or any other Google services or data not explicitly listed above.</p>
-        <h2>2. How We Use Your Information</h2>
-        <p>We use your information exclusively to provide the core functionality of the bot:</p>
-        <ul>
-            <li>To verify your subscription to the required YouTube channel.</li>
-            <li>To assign or remove the designated "Subscriber" role automatically in Discord.</li>
-            <li>To maintain your verification status across multiple checks.</li>
-        </ul>
-        <p>We do not sell, rent, lease, or share your data with any third parties. We will not use your information for marketing, advertising, or any purpose other than providing the Subscriber Role service.</p>
-        <h2>3. Log Data</h2>
-        <p>When you visit or use our service, we automatically collect certain information ("Log Data"). This may include:</p>
-        <ul>
-            <li>Your computer's Internet Protocol (IP) address</li>
-            <li>Browser version and type</li>
-            <li>Pages visited and time spent on each page</li>
-            <li>Date and time of your requests</li>
-            <li>Other statistics and diagnostic information</li>
-        </ul>
-        <p>This information is used to maintain and improve the service, monitor for security threats, and analyze service usage patterns.</p>
-        <h2>4. Cookies</h2>
-        <p>Our website may use cookies, which are small data files stored on your computer's hard drive. Cookies help us:</p>
-        <ul>
-            <li>Remember your preferences and settings</li>
-            <li>Improve user experience</li>
-            <li>Protect against unauthorized access</li>
-            <li>Track website performance and analytics</li>
-        </ul>
-        <p>You can choose to accept or refuse cookies through your browser settings. However, refusing cookies may limit your ability to use certain features of our service.</p>
-        <h2>5. Security and Data Protection</h2>
-        <p>We value your trust and are committed to protecting your information. We employ industry-standard encryption and security measures:</p>
-        <ul>
-            <li>OAuth2 tokens are encrypted both in transit and at rest in our database</li>
-            <li>All data transmissions use HTTPS/TLS encryption</li>
-            <li>Access to your data is restricted and access-controlled</li>
-            <li>We implement security procedures to protect confidentiality</li>
-        </ul>
-        <p>However, no method of electronic transmission or storage is 100% secure. While we implement reasonable security measures, we cannot guarantee absolute security of your information.</p>
-        <h2>6. Data Retention and Deletion</h2>
-        <p>Your authentication tokens are stored securely in our database only as long as necessary to provide the service. If you wish to revoke our access at any time, you can do so from your <a href="https://security.google.com/settings/security/permissions" target="_blank">Google Account Permissions page</a>. Revoking access will result in:</p>
-        <ul>
-            <li>Automatic removal of your "Subscriber" role on Discord during the next verification check</li>
-            <li>Deletion of your stored refresh token from our database</li>
-            <li>Stored tokens that could not be re-checked for {os.environ['TOKEN_RETENTION_DAYS']} days are deleted as well</li>
-            <li>Cessation of all subscription verification checks for your account</li>
-        </ul>
-        <p><strong>Data Requests:</strong> You have the right to request access to, edit, or delete your personal data. All such requests will be processed within 7 days of receipt. To submit a data request, deletion request, or to receive your data package, please contact us at <a href="mailto:ian@iancheung.dev">ian@iancheung.dev</a> with your Discord ID and details of your request.</p>
-        <h2>7. Service Providers</h2>
-        <p>We may employ third-party companies and individuals to facilitate our service, including:</p>
-        <ul>
-            <li>Google/YouTube API services for subscription verification</li>
-            <li>Discord API services for role management</li>
-            <li>Hosting and database companies</li>
-        </ul>
-        <p>These third parties have access to your information only to the extent necessary to perform the functions assigned to them and are obligated not to disclose or use the information for any other purpose.</p>
-        <h2>8. Children's Privacy</h2>
-        <p>Our service does not address anyone under the age of 13. We do not knowingly collect personal identifiable information from children under 13. If we discover that a child under 13 has provided us with personal information, we will immediately delete this information from our servers. If you are a parent or guardian and believe your child has provided us with information, please contact us immediately.</p>
-        <h2>9. Links to Other Sites</h2>
-        <p>Our service may contain links to third-party websites. These external sites are not operated by us, and we are not responsible for their privacy practices, content, or policies. We strongly advise you to review the privacy policies of any third-party sites before providing your information.</p>
-        <h2>10. Changes to This Privacy Policy</h2>
-        <p>We may update this Privacy Policy from time to time as our service evolves or in response to changes in law. We will notify you of significant changes by posting the updated policy on this page with an updated "Last updated" date. Continued use of the service after changes constitutes your acceptance of the updated policy.</p>
-        <h2>11. Contact Us</h2>
-        <p>If you have any questions, concerns, or suggestions about this Privacy Policy, or if you wish to make a data request, deletion request, or receive your data package, please contact the developer via email at <a href="mailto:ian@iancheung.dev">ian@iancheung.dev</a>.</p>""",
+        page("privacy"),
     )
 
 
@@ -227,34 +138,7 @@ async def terms_of_service(request: Request):
         "Subscriber Role - Terms of Service",
         "Terms of service for Subscriber Role Discord bot. Read our usage policies and terms.",
         "https://subscriber.iancheung.dev/terms",
-        f"""<h1>Terms of Service for Subscriber Role</h1>
-        <p><a href="/">Return to Home</a></p>
-        <p>Last updated: {datetime.datetime.now().strftime("%B %d, %Y")}</p>
-        <p>By using the <strong>Subscriber Role</strong> Discord bot, you agree to the following terms and conditions.</p>
-        <h2>1. Acceptance of Terms</h2>
-        <p>By inviting and using the Subscriber Role bot in your Discord server, you agree to be bound by these Terms of Service. The bot uses YouTube API Services, so by using it you also agree to be bound by the <a href="https://www.youtube.com/t/terms" target="_blank">YouTube Terms of Service</a>. If you do not agree with any of these terms, you should not use the bot.</p>
-        <h2>2. Use of the Bot</h2>
-        <p>The Subscriber Role bot is provided as-is for the purpose of verifying YouTube channel subscriptions and assigning Discord roles. You agree to use this bot in compliance with Discord's Terms of Service and Community Guidelines.</p>
-        <h2>3. User Responsibilities</h2>
-        <p>As a server administrator, you are responsible for:</p>
-        <ul>
-            <li>Configuring the bot appropriately with a valid YouTube channel ID and role.</li>
-            <li>Ensuring all users in your server understand and consent to the verification process.</li>
-            <li>Maintaining compliance with applicable laws and Discord policies.</li>
-            <li>Handling user data appropriately and respecting user privacy.</li>
-        </ul>
-        <h2>4. Limitation of Liability</h2>
-        <p>The Subscriber Role bot is provided on an "AS-IS" basis without warranties of any kind. We are not responsible for:</p>
-        <ul>
-            <li>Service interruptions, downtime, or data loss.</li>
-            <li>Errors in subscription verification or role assignment.</li>
-            <li>Discord API changes that may affect bot functionality.</li>
-            <li>Any damages or losses resulting from the use of this bot.</li>
-        </ul>
-        <h2>5. Modification and Termination</h2>
-        <p>We reserve the right to modify or discontinue the bot at any time without notice. We also reserve the right to terminate access to the bot for any user or server that violates these terms.</p>
-        <h2>6. Disclaimer</h2>
-        <p>This bot is not affiliated with Discord, Google, or YouTube. Discord, Google, and YouTube are trademarks of their respective owners.</p>""",
+        page("terms"),
     )
 
 
@@ -268,7 +152,7 @@ def check_subscriptions(credentials, channel_id: str):
         items = response.get("items", [])
         return items[0]["snippet"] if items else False
     except Exception as e:
-        print(f"Error checking sub status: {e}")
+        logging.error(f"Error checking sub status: {e}")
         return None
 
 
@@ -449,10 +333,11 @@ async def callback(request: Request):
             )
         )
     except Exception as e:
+        logging.error(f"Error fetching the Discord profile: {e}")
         return HTMLResponse(
             render_response(
                 "Unexpected Error",
-                f"An unexpected error occurred while fetching your Discord profile: {e}",
+                "An unexpected error occurred while fetching your Discord profile. Please try again.",
             )
         )
     role = guild.get_role(role_id)
@@ -483,10 +368,11 @@ async def callback(request: Request):
                 )
             )
         except Exception as e:
+            logging.error(f"Error assigning the role: {e}")
             return HTMLResponse(
                 render_response(
                     "Unexpected Error",
-                    f"An unexpected error occurred while assigning the role: {e}",
+                    "An unexpected error occurred while assigning the role. Please try again.",
                 )
             )
         tiers = await get_tiers(server_id)
@@ -502,7 +388,7 @@ async def callback(request: Request):
                 dm_embed.set_footer(text=f"Sent from {guild.name}")
                 await member.send(embed=dm_embed)
             except Exception as e:
-                print(f"Error sending verification DM to {discord_id}: {e}")
+                logging.error(f"Error sending verification DM to {discord_id}: {e}")
         try:
             await log_action(
                 guild_id,
@@ -511,10 +397,11 @@ async def callback(request: Request):
                 server_id=server_id,
             )
         except Exception as e:
+            logging.error(f"Error sending verification log: {e}")
             return HTMLResponse(
                 render_response(
                     "Success",
-                    f"Success! However, the bot failed to send a log message to the log channel. Please check the log channel permissions. Error: {e}",
+                    "Success! However, the bot failed to send a log message to the log channel. Please check the log channel permissions.",
                 )
             )
         return HTMLResponse(
