@@ -6,6 +6,7 @@ import html
 import logging
 import os
 import pathlib
+import re
 
 import aiohttp
 import discord
@@ -57,6 +58,8 @@ app.add_middleware(
 
 BOT_AVATAR = "https://iancheung.dev/assets/img/subscriber-role.png"
 PAGES = pathlib.Path(__file__).parent / "pages"
+RUN_VERIFY = "Please run the <b>/verify</b> command again in Discord."
+INVALID_LINK = f"This verification link is invalid or has expired. {RUN_VERIFY}"
 
 
 def page(name: str) -> str:
@@ -89,7 +92,10 @@ def generate_page(
 async def validate_request_size_and_user_agent(request: Request, call_next):
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > 1000000:
-        return HTMLResponse(content="Request too large", status_code=413)
+        return HTMLResponse(
+            render_response("Request Too Large", "This request is too large."),
+            status_code=413,
+        )
     user_agent = request.headers.get("user-agent", "").lower()
     if not any(
         crawler in user_agent for crawler in os.getenv("ALLOWED_CRAWLERS").split(",")
@@ -98,7 +104,12 @@ async def validate_request_size_and_user_agent(request: Request, call_next):
             blocked in user_agent
             for blocked in os.getenv("BLOCKED_USER_AGENTS").split(",")
         ):
-            return HTMLResponse(content="Access denied", status_code=403)
+            return HTMLResponse(
+                render_response(
+                    "Access Denied", "Your browser is not allowed to open this page."
+                ),
+                status_code=403,
+            )
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -193,7 +204,7 @@ def verify_signature(state: str, state_secret: str) -> tuple:
 def render_response(title: str, content: str) -> str:
     return generate_page(
         f"Subscriber Role - {title}",
-        content[:160],
+        re.sub("<[^>]+>", "", content)[:160],
         "https://subscriber.iancheung.dev/callback",
         f"""<h1>{title}</h1> <p>{content}</p> <p><a href="/">Return to Home</a></p>""",
         centered=True,
@@ -205,33 +216,33 @@ def render_response(title: str, content: str) -> str:
 async def callback(request: Request):
     code = request.query_params.get("code")
     state = request.query_params.get("state")
-    if not code or not state:
+    if request.query_params.get("error"):
         return HTMLResponse(
-            render_response("Invalid Request", "Missing code or state.")
+            render_response(
+                "Sign-In Cancelled",
+                f"You cancelled the Google sign-in. {RUN_VERIFY}",
+            )
         )
+    if not code or not state:
+        return HTMLResponse(render_response("Invalid Link", INVALID_LINK))
     state_secret = os.environ.get("STATE_SECRET")
     if not state_secret:
         return HTMLResponse(
             render_response(
-                "Configuration Error",
-                "Server configuration error. Please try again later.",
+                "Internal Server Error",
+                "The bot is not configured correctly. Please try again later.",
             )
         )
     parsed_state = verify_signature(state, state_secret)
     if not parsed_state:
-        return HTMLResponse(
-            render_response(
-                "Invalid Request",
-                "Invalid or tampered state parameter. Please try verification again.",
-            )
-        )
+        return HTMLResponse(render_response("Invalid Link", INVALID_LINK))
     guild_id, discord_id, server_id = parsed_state
     server_config = await get_server_config_by_id(server_id)
     if not server_config:
         return HTMLResponse(
             render_response(
-                "Configuration Error",
-                "This server hasn't been configured yet. Ask an admin to run `/setup`.",
+                "Server Not Set Up",
+                "This server has not been set up yet. Ask a server admin to run the <b>/setup</b> command.",
             )
         )
     yt_channel_id = server_config["yt_channel_id"]
@@ -240,10 +251,11 @@ async def callback(request: Request):
     redirect_uri = os.environ["OAUTH_REDIRECT_URI"]
     token_response = await get_tokens(code, redirect_uri)
     if "error" in token_response:
+        logging.error(f"Error exchanging the Google code: {token_response}")
         return HTMLResponse(
             render_response(
-                "Authentication Error",
-                f"Error authenticating: {token_response.get('error_description', 'Unknown error')}",
+                "Sign-In Failed",
+                f"The bot could not sign you in with Google. {RUN_VERIFY}",
             )
         )
     access_token = token_response.get("access_token")
@@ -260,8 +272,8 @@ async def callback(request: Request):
             else:
                 return HTMLResponse(
                     render_response(
-                        "Access Denied",
-                        "Could not retrieve a refresh token. Please re-authenticate and make sure to allow offline access.",
+                        "Sign-In Failed",
+                        f"Google did not give the bot access to your YouTube account. {RUN_VERIFY}",
                     )
                 )
     else:
@@ -278,8 +290,8 @@ async def callback(request: Request):
     if snippet is None:
         return HTMLResponse(
             render_response(
-                "Verification Unavailable",
-                "We could not check your subscription right now. Please try again later.",
+                "Try Again Later",
+                "The bot could not check your subscription right now. Please try again later.",
             )
         )
     is_subscribed = bool(snippet)
@@ -287,7 +299,8 @@ async def callback(request: Request):
     if not guild:
         return HTMLResponse(
             render_response(
-                "Bot Error", "Internal bot error: Cannot find Discord server."
+                "Internal Server Error",
+                "The bot cannot find the Discord server. Ask a server admin to make sure the bot is in the server.",
             )
         )
     if is_subscribed and snippet.get("channelId"):
@@ -309,7 +322,7 @@ async def callback(request: Request):
                 return HTMLResponse(
                     render_response(
                         "Account Already Linked",
-                        "This YouTube account is already linked to another member of this server.",
+                        "This YouTube account is already linked to another member of this server. Please use a different YouTube account to verify.",
                     )
                 )
             except discord.errors.NotFound:
@@ -321,30 +334,31 @@ async def callback(request: Request):
     except discord.errors.NotFound:
         return HTMLResponse(
             render_response(
-                "User Not Found",
-                "Cannot find your user in the Discord server. Are you sure you are in it?",
+                "Member Not Found",
+                f"The bot cannot find you in the Discord server. Please join the server first. {RUN_VERIFY}",
             )
         )
     except discord.errors.Forbidden:
         return HTMLResponse(
             render_response(
                 "Permission Error",
-                "Bot lacks permission to fetch users from the Discord server. (Is Server Members intent enabled?)",
+                "The bot lacks permission to find you in the Discord server. Ask a server admin to make sure the bot is in the server.",
             )
         )
     except Exception as e:
         logging.error(f"Error fetching the Discord profile: {e}")
         return HTMLResponse(
             render_response(
-                "Unexpected Error",
-                "An unexpected error occurred while fetching your Discord profile. Please try again.",
+                "Try Again Later",
+                "The bot could not load your Discord profile. Please try again later.",
             )
         )
     role = guild.get_role(role_id)
     if not role:
         return HTMLResponse(
             render_response(
-                "Role Not Found", "Internal bot error: Cannot find the specified role."
+                "Role Not Found",
+                "The bot cannot find the subscriber role. Ask a server admin to check the role with the <b>/setup</b> command.",
             )
         )
     yt_channel_url = f"https://www.youtube.com/channel/{yt_channel_id}"
@@ -364,15 +378,15 @@ async def callback(request: Request):
             return HTMLResponse(
                 render_response(
                     "Permission Error",
-                    "Bot lacks permission to assign this role. Please explicitly ensure the bot's role is higher in the hierarchy than the Subscriber role.",
+                    "The bot lacks permission to give you the role. Ask a server admin to move the bot's role above the subscriber role.",
                 )
             )
         except Exception as e:
             logging.error(f"Error assigning the role: {e}")
             return HTMLResponse(
                 render_response(
-                    "Unexpected Error",
-                    "An unexpected error occurred while assigning the role. Please try again.",
+                    "Try Again Later",
+                    "The bot could not give you the role. Please try again later.",
                 )
             )
         tiers = await get_tiers(server_id)
@@ -400,14 +414,14 @@ async def callback(request: Request):
             logging.error(f"Error sending verification log: {e}")
             return HTMLResponse(
                 render_response(
-                    "Success",
-                    "Success! However, the bot failed to send a log message to the log channel. Please check the log channel permissions.",
+                    "Verification Successful",
+                    "Your subscription has been verified and you have been given the role on Discord. However, the bot could not post to the log channel. If you are a server admin, please check the log channel permissions.",
                 )
             )
         return HTMLResponse(
             render_response(
                 "Verification Successful",
-                "Success! Your subscription has been verified and you have been granted the role on Discord. You may now close this window.",
+                "Your subscription has been verified and you have been given the role on Discord. You may now close this window.",
             )
         )
     else:
@@ -422,7 +436,7 @@ async def callback(request: Request):
             pass
         return HTMLResponse(
             render_response(
-                "Verification Failed",
-                "Verification failed: You are not subscribed to the required channel. Please subscribe and try again.",
+                "Not Subscribed",
+                f'You are not subscribed to the required channel. Please subscribe to <a href="{yt_channel_url}" target="_blank">{html.escape(channel_name)}</a> and try again.',
             )
         )

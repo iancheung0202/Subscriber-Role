@@ -12,4 +12,9 @@ os.environ.update(
     TOKEN_RETENTION_DAYS="30",
     CHANNEL_NAME_REFRESH_HOURS="24",
     TOKEN_ENCRYPTION_KEY="test",
+    CORS_ORIGIN="http://test.local",
+    ALLOWED_HOST="test.local",
+    DATABASE_URL="postgres://test",
+    OAUTH_REDIRECT_URI="http://test.local/callback",
+    STATE_SECRET="secret",
 )
