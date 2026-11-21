@@ -63,7 +63,7 @@ class Bot(commands.Bot):
             await asyncio.sleep(timeout)
 
 
-bot = Bot(command_prefix="!", intents=intents)
+bot = Bot(command_prefix=commands.when_mentioned, intents=intents)
 
 
 async def owner_log(env_var: str, message: str, color=COLOR):
@@ -96,6 +96,22 @@ async def on_guild_join(guild: discord.Guild):
         f"{CHECK} Joined {describe_guild(guild)}. Now in {len(bot.guilds)} servers.",
         discord.Color.green(),
     )
+    try:
+        await asyncio.sleep(3)
+        owner = await bot.fetch_user(guild.owner_id)
+        await owner.send(
+            embed=discord.Embed(
+                title=f"{COG} Getting Started",
+                description=f"{bot.user.mention} was just added to **{discord.utils.escape_markdown(guild.name)}**!\n\n"
+                f"1. Run `/setup` to set your YouTube channel and subscriber role {YT}\n"
+                f"2. Ask your members to run `/verify` to get the role {CHECK}",
+                color=COLOR,
+            ).set_footer(
+                text="Tip: Require the subscriber role in your giveaway bot for subscriber-only giveaways."
+            )
+        )
+    except Exception as e:
+        logging.info(f"Error sending setup DM to owner {guild.owner_id}: {e}")
 
 
 @bot.event
@@ -105,6 +121,29 @@ async def on_guild_remove(guild: discord.Guild):
         f"{CROSS} Left {describe_guild(guild)}. Now in {len(bot.guilds)} servers.",
         discord.Color.red(),
     )
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    mention = bot.user.mention
+    if message.author.bot or message.content.lower().split() not in (
+        [mention],
+        [mention, "help"],
+    ):
+        return
+    try:
+        await message.reply(
+            embed=discord.Embed(
+                title=f"{COG} Commands",
+                description="\n".join(
+                    f"`/{command.name}` {command.description}"
+                    for command in bot.tree.get_commands()
+                ),
+                color=COLOR,
+            )
+        )
+    except Exception as e:
+        logging.info(f"Error sending help reply in {message.channel.id}: {e}")
 
 
 @bot.event
@@ -121,6 +160,7 @@ async def on_app_command_completion(
 @bot.tree.command(
     name="setup", description="Configure the bot for your server. (Admin only)"
 )
+@discord.app_commands.guild_only()
 async def setup(interaction: discord.Interaction):
     if not (
         interaction.permissions.administrator
@@ -144,6 +184,7 @@ async def setup(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="premium", description="Enable premium for this server.")
+@discord.app_commands.guild_only()
 async def premium(interaction: discord.Interaction):
     has_premium = await is_guild_premium(interaction)
     store_link = (
@@ -170,6 +211,7 @@ async def premium(interaction: discord.Interaction):
 @bot.tree.command(
     name="verify", description="Link your YouTube account to verify your subscription."
 )
+@discord.app_commands.guild_only()
 async def verify(interaction: discord.Interaction):
     configs = await get_server_configs_for_guild(interaction.guild_id)
     if not configs:
