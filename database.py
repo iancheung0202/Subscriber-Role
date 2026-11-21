@@ -269,7 +269,7 @@ async def clear_stale_refresh_tokens(before: datetime.datetime):
     pool = await get_pool()
     async with pool.acquire() as connection:
         await connection.execute(
-            "UPDATE users SET refresh_token = NULL WHERE refresh_token IS NOT NULL AND (SELECT MAX(last_checked) FROM subscriptions WHERE user_id = users.id) < $1",
+            "UPDATE users SET refresh_token = NULL WHERE refresh_token IS NOT NULL AND (NOT EXISTS (SELECT 1 FROM servers WHERE guild_id = users.guild_id) OR (SELECT MAX(last_checked) FROM subscriptions WHERE user_id = users.id) < $1)",
             before,
         )
 
