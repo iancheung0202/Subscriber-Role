@@ -25,3 +25,9 @@ def test_tampered_state_is_an_invalid_link():
 def test_description_has_no_html_tags():
     page = api.render_response("Title", 'Run <b>/verify</b> <a href="x">here</a>.')
     assert 'content="Run /verify here."' in page
+
+
+def test_notice_markdown_becomes_html(monkeypatch):
+    monkeypatch.setenv("SITE_NOTICE", "Hi! [Add it](https://test.local/) now.")
+    page = api.render_response("Title", "Content")
+    assert '<p>Hi! <a href="https://test.local/">Add it</a> now.</p>' in page

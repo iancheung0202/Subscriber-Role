@@ -10,6 +10,7 @@ import re
 
 import aiohttp
 import discord
+import markdown
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -74,16 +75,12 @@ def generate_page(
     title: str, description: str, url: str, body_html: str, centered: bool = False
 ) -> str:
     align = " text-align: center;" if centered else ""
-    styles = f"body {{ font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6;{align} }} a {{ color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; }} a:hover {{ opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }} a:active {{ transform: translateY(0); }} footer {{ text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }}"
+    styles = f"body {{ font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6;{align} }} a {{ color: #af4875; border: 2px solid #d8c3cd; padding: 8px 12px; border-radius: 8px; text-decoration: none; display: inline-block; margin: 2px; transition: all 0.3s ease; }} a:hover {{ opacity: 0.85; transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }} a:active {{ transform: translateY(0); }} aside {{ border: 2px solid #d8c3cd; border-radius: 8px; padding: 0 12px; color: #af4875; }} aside p {{ margin: 8px 0; }} aside a {{ border: 0; padding: 0; margin: 0; text-decoration: underline; display: inline; box-shadow: none; }} footer {{ text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.9em; color: #666; }}"
     footer_html = (
         "<footer><p>Developed by Ian Cheung • All rights reserved.</p></footer>"
     )
     notice = os.environ.get("SITE_NOTICE")
-    notice_html = (
-        f'<p style="border: 2px solid #d8c3cd; border-radius: 8px; padding: 8px 12px; color: #af4875;">{html.escape(notice)}</p>'
-        if notice
-        else ""
-    )
+    notice_html = f"<aside>{markdown.markdown(notice)}</aside>" if notice else ""
     full_body = f"{notice_html}\n        {body_html}\n        {footer_html}"
     return f'<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0"> <meta name="description" content="{description}"> <meta name="theme-color" content="#af4875"> <meta property="og:title" content="{title}"> <meta property="og:description" content="{description}"> <meta property="og:image" content="{BOT_AVATAR}?size=256"> <meta property="og:url" content="{url}"> <meta property="og:type" content="website"> <meta name="twitter:card" content="summary_large_image"> <meta name="twitter:title" content="{title}"> <meta name="twitter:description" content="{description}"> <meta name="twitter:image" content="{BOT_AVATAR}?size=256"> <title>{title}</title> <link rel="icon" href="{BOT_AVATAR}?size=32" type="image/png"> <style>{styles}</style> </head> <body> {full_body} </body> </html>'
 
