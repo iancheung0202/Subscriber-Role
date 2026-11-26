@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import logging
 import os
+import time
 import urllib.parse
 
 import discord
@@ -102,6 +103,8 @@ class YouTubeChannelModal(Modal, title="Set YouTube Channel"):
                     self.parent_view.role_id,
                     self.parent_view.channel_id,
                     server_id=self.parent_view.server_id,
+                    verification_dm_content=self.parent_view.verification_dm_content,
+                    unsubscribe_dm_content=self.parent_view.unsubscribe_dm_content,
                 )
             await self.parent_view.update_config_display()
         except Exception as e:
@@ -956,7 +959,9 @@ class VerifyChannelSelectView(View):
                 ephemeral=True,
             )
             return
-        state_data = f"{guild_id}_{interaction.user.id}_{config['id']}"
+        state_data = (
+            f"{guild_id}_{interaction.user.id}_{config['id']}_{int(time.time())}"
+        )
         signature = hmac.new(
             state_secret.encode(), state_data.encode(), hashlib.sha256
         ).hexdigest()

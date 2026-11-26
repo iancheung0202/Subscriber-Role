@@ -186,6 +186,16 @@ async def get_user_id(guild_id: int, discord_id: int):
         )
 
 
+async def get_user_refresh_token(user_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        return decrypt_token(
+            await connection.fetchval(
+                "SELECT refresh_token FROM users WHERE id = $1", user_id
+            )
+        )
+
+
 async def update_user_refresh_token(user_id: int, refresh_token: str):
     pool = await get_pool()
     async with pool.acquire() as connection:
@@ -254,15 +264,16 @@ async def set_account_hash(user_id: int, account_hash: str = None):
         )
 
 
-async def claim_account_hash(user_id: int, guild_id: int, account_hash: str):
+async def claim_account_hash(user_id: int, guild_id: int, account_hash: str) -> bool:
     pool = await get_pool()
     async with pool.acquire() as connection:
-        await connection.execute(
+        status = await connection.execute(
             "UPDATE users SET yt_account_hash = $1 WHERE id = $2 AND yt_account_hash IS NULL AND NOT EXISTS (SELECT 1 FROM users WHERE guild_id = $3 AND yt_account_hash = $1)",
             account_hash,
             user_id,
             guild_id,
         )
+        return status == "UPDATE 1"
 
 
 async def clear_stale_refresh_tokens(before: datetime.datetime):

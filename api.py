@@ -7,6 +7,7 @@ import logging
 import os
 import pathlib
 import re
+import time
 
 import aiohttp
 import discord
@@ -25,12 +26,11 @@ from bot import bot, log_action
 from database import (
     add_quota_usage,
     clear_user_refresh_token,
-    decrypt_token,
     get_account_holder,
-    get_pool,
     get_server_config_by_id,
     get_tiers,
     get_user_id,
+    get_user_refresh_token,
     hash_account,
     set_account_hash,
     update_subscription_status,
@@ -41,7 +41,12 @@ from utils import CHECK, CROSS, NEUTRAL, get_youtube_channel_name
 
 app = FastAPI()
 
-limiter = Limiter(key_func=get_remote_address)
+
+def client_address(request: Request) -> str:
+    return request.headers.get("x-real-ip") or get_remote_address(request)
+
+
+limiter = Limiter(key_func=client_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
@@ -60,6 +65,7 @@ app.add_middleware(
 BOT_AVATAR = "https://iancheung.dev/assets/img/subscriber-role.png"
 PAGES = pathlib.Path(__file__).parent / "pages"
 RUN_VERIFY = "Please run the <b>/verify</b> command again in Discord."
+LINK_LIFETIME_SECONDS = 3600
 INVALID_LINK = f"This verification link is invalid or has expired. {RUN_VERIFY}"
 
 
@@ -85,6 +91,12 @@ def generate_page(
     return f'<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0"> <meta name="description" content="{description}"> <meta name="theme-color" content="#af4875"> <meta property="og:title" content="{title}"> <meta property="og:description" content="{description}"> <meta property="og:image" content="{BOT_AVATAR}?size=256"> <meta property="og:url" content="{url}"> <meta property="og:type" content="website"> <meta name="twitter:card" content="summary_large_image"> <meta name="twitter:title" content="{title}"> <meta name="twitter:description" content="{description}"> <meta name="twitter:image" content="{BOT_AVATAR}?size=256"> <title>{title}</title> <link rel="icon" href="{BOT_AVATAR}?size=32" type="image/png"> <style>{styles}</style> </head> <body> {full_body} </body> </html>'
 
 
+def listed(name: str, user_agent: str) -> bool:
+    return any(
+        entry and entry in user_agent for entry in os.getenv(name, "").split(",")
+    )
+
+
 @app.middleware("http")
 async def validate_request_size_and_user_agent(request: Request, call_next):
     content_length = request.headers.get("content-length")
@@ -94,19 +106,15 @@ async def validate_request_size_and_user_agent(request: Request, call_next):
             status_code=413,
         )
     user_agent = request.headers.get("user-agent", "").lower()
-    if not any(
-        crawler in user_agent for crawler in os.getenv("ALLOWED_CRAWLERS").split(",")
+    if not listed("ALLOWED_CRAWLERS", user_agent) and listed(
+        "BLOCKED_USER_AGENTS", user_agent
     ):
-        if any(
-            blocked in user_agent
-            for blocked in os.getenv("BLOCKED_USER_AGENTS").split(",")
-        ):
-            return HTMLResponse(
-                render_response(
-                    "Access Denied", "Your browser is not allowed to open this page."
-                ),
-                status_code=403,
-            )
+        return HTMLResponse(
+            render_response(
+                "Access Denied", "Your browser is not allowed to open this page."
+            ),
+            status_code=403,
+        )
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -190,9 +198,11 @@ def verify_signature(state: str, state_secret: str) -> tuple:
         if not hmac.compare_digest(signature, expected_signature):
             return None
         parts = state_data.split("_")
-        if len(parts) != 3:
+        if len(parts) != 4:
             return None
-        guild_id, discord_id, server_id = int(parts[0]), int(parts[1]), int(parts[2])
+        guild_id, discord_id, server_id, created = [int(part) for part in parts]
+        if time.time() - created > LINK_LIFETIME_SECONDS:
+            return None
         return (guild_id, discord_id, server_id)
     except (ValueError, IndexError, AttributeError):
         return None
@@ -256,25 +266,17 @@ async def callback(request: Request):
             )
         )
     access_token = token_response.get("access_token")
-    refresh_token = token_response.get("refresh_token")
     user_id = await get_user_id(guild_id, discord_id)
+    previous_token = await get_user_refresh_token(user_id)
+    refresh_token = token_response.get("refresh_token") or previous_token
     if not refresh_token:
-        pool = await get_pool()
-        async with pool.acquire() as connection:
-            row = await connection.fetchrow(
-                "SELECT refresh_token FROM users WHERE id = $1", user_id
+        return HTMLResponse(
+            render_response(
+                "Sign-In Failed",
+                f"Google did not give the bot access to your YouTube account. {RUN_VERIFY}",
             )
-            if row and row["refresh_token"]:
-                refresh_token = decrypt_token(row["refresh_token"])
-            else:
-                return HTMLResponse(
-                    render_response(
-                        "Sign-In Failed",
-                        f"Google did not give the bot access to your YouTube account. {RUN_VERIFY}",
-                    )
-                )
-    else:
-        await update_user_refresh_token(user_id, refresh_token)
+        )
+    await update_user_refresh_token(user_id, refresh_token)
     creds = Credentials(
         token=access_token,
         refresh_token=refresh_token,
@@ -306,7 +308,10 @@ async def callback(request: Request):
         if holder:
             try:
                 await guild.fetch_member(holder["discord_id"])
-                await clear_user_refresh_token(user_id)
+                if previous_token:
+                    await update_user_refresh_token(user_id, previous_token)
+                else:
+                    await clear_user_refresh_token(user_id)
                 try:
                     await log_action(
                         guild_id,
@@ -387,15 +392,15 @@ async def callback(request: Request):
                 )
             )
         tiers = await get_tiers(server_id)
-        if tiers and guild_id in await get_premium_guild_ids():
+        message = server_config.get("verification_dm_content")
+        premium = (tiers or message) and guild_id in await get_premium_guild_ids()
+        if tiers and premium:
             await sync_tier_roles(
                 member, guild, server_config, tiers, channel_name, snippet
             )
-        if server_config.get("verification_dm_content"):
+        if message and premium:
             try:
-                dm_embed = discord.Embed(
-                    description=server_config["verification_dm_content"], color=0xAF4875
-                )
+                dm_embed = discord.Embed(description=message, color=0xAF4875)
                 dm_embed.set_footer(text=f"Sent from {guild.name}")
                 await member.send(embed=dm_embed)
             except Exception as e:

@@ -29,7 +29,7 @@ from utils import (
     get_youtube_channel_name,
     is_guild_premium,
 )
-from views import SetupMainView, VerifyChannelSelectView
+from views import SetupMainView, VerifyChannelSelectView, send_error
 
 intents = discord.Intents.default()
 
@@ -265,7 +265,7 @@ async def on_ready():
     except Exception as e:
         logging.error(f"Failed to sync commands: {e}")
     if not any(task.get_name() == "status_task" for task in asyncio.all_tasks()):
-        bot.loop.create_task(bot.status_task())
+        bot.loop.create_task(bot.status_task(), name="status_task")
 
 
 @bot.tree.error
@@ -273,10 +273,7 @@ async def on_app_command_error(
     interaction: discord.Interaction, error: discord.app_commands.AppCommandError
 ):
     logging.error(error, exc_info=error)
-    if not interaction.response.is_done():
-        await interaction.response.send_message(
-            f"An error occurred: {error}", ephemeral=True
-        )
+    await send_error(interaction)
 
 
 @bot.event

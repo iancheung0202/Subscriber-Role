@@ -134,7 +134,11 @@ async def set_role(member, target: dict, is_subscribed: bool, stats: dict):
         logging.error(f"Failed to {action} role for {member.id}: Bot lacks permission.")
         message, color = failure, discord.Color.orange()
     else:
-        if not is_subscribed and config.get("unsubscribe_dm_content"):
+        if (
+            not is_subscribed
+            and target["premium"]
+            and config.get("unsubscribe_dm_content")
+        ):
             try:
                 dm_embed = discord.Embed(
                     description=config["unsubscribe_dm_content"], color=0xAF4875
@@ -178,7 +182,12 @@ async def sync_member(row, target: dict, stats: dict):
     if snippet is REVOKED:
         await clear_user_refresh_token(user_id)
     if is_subscribed and not row["yt_account_hash"] and snippet.get("channelId"):
-        await claim_account_hash(user_id, guild_id, hash_account(snippet["channelId"]))
+        claimed = await claim_account_hash(
+            user_id, guild_id, hash_account(snippet["channelId"])
+        )
+        if not claimed and role not in member.roles:
+            await clear_user_refresh_token(user_id)
+            return
     if is_subscribed != (role in member.roles):
         await set_role(member, target, is_subscribed, stats)
     if target["tiers"]:
@@ -229,11 +238,11 @@ async def run_sync() -> dict:
     premium_guilds = await get_premium_guild_ids()
     tiers = await get_tiers()
     for server_id, target in targets.items():
+        target["premium"] = target["config"]["guild_id"] in premium_guilds
         target["tiers"] = [
             tier
             for tier in tiers
-            if tier["server_id"] == server_id
-            and target["config"]["guild_id"] in premium_guilds
+            if tier["server_id"] == server_id and target["premium"]
         ]
     now = datetime.datetime.now()
     slack = datetime.timedelta(hours=SYNC_INTERVAL_HOURS) / 2
@@ -287,10 +296,9 @@ async def run_sync() -> dict:
             logging.info("YouTube quota exhausted, stopping sync until the next run.")
             break
         await asyncio.sleep(1)
-    if not stats["remaining"]:
-        await clear_stale_refresh_tokens(
-            now - datetime.timedelta(days=TOKEN_RETENTION_DAYS)
-        )
+    await clear_stale_refresh_tokens(
+        now - datetime.timedelta(days=TOKEN_RETENTION_DAYS)
+    )
     return stats
 
 

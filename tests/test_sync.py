@@ -66,7 +66,7 @@ class World:
             [],
             [],
         )
-        self.check = check
+        self.check, self.claims = check, True
         patches = {
             "add_quota_usage": self.add_quota,
             "decrypt_token": lambda token: token,
@@ -90,6 +90,7 @@ class World:
 
     async def claim(self, user_id, guild_id, account_hash):
         self.claimed.append(user_id)
+        return self.claims
 
     async def log(self, guild_id, message, color=None, server_id=None):
         self.logs.append(message)
@@ -122,6 +123,7 @@ def target(guild, role, **config):
         "guild": guild,
         "role": role,
         "channel_name": "Channel",
+        "premium": True,
         "tiers": [],
     }
 
@@ -154,6 +156,22 @@ def test_subscribed_member_without_role_gets_it(monkeypatch, role):
     assert world.claimed == [50]
 
 
+def test_account_linked_to_another_member_gives_no_role(monkeypatch, role):
+    world, member, stats = World(monkeypatch), Member(5), new_stats()
+    world.claims = False
+    run(sync.sync_member(row(account_hash=None), target(Guild([member]), role), stats))
+    assert member.roles == [] and stats["added"] == 0
+    assert world.cleared == [50] and world.statuses == []
+
+
+def test_member_sharing_an_account_keeps_an_existing_role(monkeypatch, role):
+    world, member, stats = World(monkeypatch), Member(5, [role]), new_stats()
+    world.claims = False
+    run(sync.sync_member(row(account_hash=None), target(Guild([member]), role), stats))
+    assert member.roles == [role] and world.cleared == []
+    assert world.statuses == [(50, True)]
+
+
 def test_unsubscribed_member_loses_role_and_is_told(monkeypatch, role):
     world, member, stats = (
         World(monkeypatch, check=False),
@@ -167,6 +185,18 @@ def test_unsubscribed_member_loses_role_and_is_told(monkeypatch, role):
     )
     assert member.roles == [] and stats["removed"] == 1 and member.dms == ["Bye"]
     assert world.statuses == [(50, False)] and len(world.logs) == 1
+
+
+def test_unsubscribe_message_needs_premium(monkeypatch, role):
+    world, member, stats = (
+        World(monkeypatch, check=False),
+        Member(5, [role]),
+        new_stats(),
+    )
+    free = target(Guild([member]), role, unsubscribe_dm_content="Bye")
+    free["premium"] = False
+    run(sync.sync_member(row(), free, stats))
+    assert member.roles == [] and member.dms == []
 
 
 def test_failed_check_keeps_role(monkeypatch, role):
@@ -319,7 +349,7 @@ def test_daily_limit_pauses_the_sync(monkeypatch):
         calls == [1, 2]
         and stats["limit_hit"]
         and stats["remaining"] == 2
-        and not cleared
+        and len(cleared) == 1
     )
 
 
@@ -332,7 +362,7 @@ def test_exhausted_quota_stops_the_sync(monkeypatch):
         calls == [1, 2]
         and stats["quota_hit"]
         and stats["remaining"] == 3
-        and not cleared
+        and len(cleared) == 1
     )
 
 
