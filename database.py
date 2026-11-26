@@ -268,7 +268,7 @@ async def claim_account_hash(user_id: int, guild_id: int, account_hash: str) -> 
     pool = await get_pool()
     async with pool.acquire() as connection:
         status = await connection.execute(
-            "UPDATE users SET yt_account_hash = $1 WHERE id = $2 AND yt_account_hash IS NULL AND NOT EXISTS (SELECT 1 FROM users WHERE guild_id = $3 AND yt_account_hash = $1)",
+            "UPDATE users SET yt_account_hash = $1 WHERE id = $2 AND COALESCE(yt_account_hash, $1) = $1 AND NOT EXISTS (SELECT 1 FROM users WHERE guild_id = $3 AND yt_account_hash = $1 AND id != $2)",
             account_hash,
             user_id,
             guild_id,
