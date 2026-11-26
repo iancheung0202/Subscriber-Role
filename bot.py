@@ -213,9 +213,10 @@ async def premium(interaction: discord.Interaction):
 )
 @discord.app_commands.guild_only()
 async def verify(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True, thinking=True)
     configs = await get_server_configs_for_guild(interaction.guild_id)
     if not configs:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=discord.Embed(
                 description=f"{CROSS} This server hasn't been configured yet. Please ask an admin to run `/setup`.",
                 color=COLOR,
@@ -246,7 +247,7 @@ async def verify(interaction: discord.Interaction):
                 config["yt_channel_id"]
             )
         view = VerifyChannelSelectView(configs, channel_names)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=discord.Embed(
                 description=f"{YT} Select which YouTube channel you have subscribed to:",
                 color=COLOR,

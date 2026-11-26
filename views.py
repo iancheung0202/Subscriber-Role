@@ -46,16 +46,17 @@ from utils import (
     is_guild_premium,
 )
 
+DEFERRED = discord.InteractionResponseType.deferred_channel_message
+
 
 async def send_error(interaction: discord.Interaction):
+    embed = discord.Embed(
+        description=f"{CROSS} Something went wrong. Please try again.", color=COLOR
+    )
     if not interaction.response.is_done():
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                description=f"{CROSS} Something went wrong. Please try again.",
-                color=COLOR,
-            ),
-            ephemeral=True,
-        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    elif interaction.response.type is DEFERRED:
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class YouTubeChannelModal(Modal, title="Set YouTube Channel"):
@@ -926,6 +927,7 @@ class VerifyChannelSelectView(View):
         self.add_item(select)
 
     async def on_select(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
         server_id = int(interaction.data["values"][0])
         config = next(c for c in self.configs if c["id"] == server_id)
         user_subscription = None
@@ -1016,4 +1018,4 @@ class VerifyChannelSelectView(View):
                 name=f"Last Checked", value=last_checked, inline=False
             )
             embeds.append(status_embed)
-        await interaction.response.send_message(embeds=embeds, ephemeral=True)
+        await interaction.followup.send(embeds=embeds, ephemeral=True)
